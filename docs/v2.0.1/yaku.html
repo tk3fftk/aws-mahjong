@@ -1,0 +1,138 @@
+<!doctype html><html lang=ja-jp><head><meta charset=utf-8><meta http-equiv=X-UA-Compatible content="IE=edge"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>役一覧 - AWS麻雀</title><meta name=generator content="Hugo 0.152.2"><link href=https://mu7889yoon.github.io/aws-mahjong//index.xml rel=alternate type=application/rss+xml><link rel=canonical href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/yaku/><link rel=stylesheet href=https://mu7889yoon.github.io/aws-mahjong/css/theme.min.css><link rel=stylesheet href=https://mu7889yoon.github.io/aws-mahjong/css/chroma.min.css><script defer src=https://mu7889yoon.github.io/aws-mahjong//js/fontawesome6/all.min.js></script><script src=https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/jquery.easing@1.4.1/jquery.easing.min.js integrity="sha256-H3cjtrm/ztDeuhCN9I4yh4iN2Ybx/y1RM7rMmAesA0k=" crossorigin=anonymous></script><script src=https://cdn.jsdelivr.net/npm/clipboard@2.0.11/dist/clipboard.min.js integrity="sha256-4XodgW4TwIJuDtf+v6vDJ39FVxI0veC/kSCCmnFp7ck=" crossorigin=anonymous></script><script src=https://mu7889yoon.github.io/aws-mahjong/js/bundle.js></script><style>:root{}</style><meta property="og:url" content="https://mu7889yoon.github.io/aws-mahjong/v2.0.1/yaku/"><meta property="og:site_name" content="AWS麻雀"><meta property="og:title" content="役一覧"><meta property="og:description" content><meta property="og:locale" content="ja_jp"><meta property="og:type" content="article"><meta property="article:section" content="v2.0.1"><meta name=twitter:card content="summary"><meta name=twitter:title content="役一覧"><meta name=twitter:description content><meta itemprop=name content="役一覧"><meta itemprop=description content><link rel=stylesheet href=https://mu7889yoon.github.io/aws-mahjong/css/mobile-sidebar.css><script defer src=https://mu7889yoon.github.io/aws-mahjong/js/mobile-sidebar.js></script></head><body><div class=container><header><h1>AWS麻雀</h1></header><div class=content-container><main><h1>役一覧</h1><div id=yaku-list-v201></div><style>.yaku-description p{margin:0 0 4px}.yaku-description p:last-child{margin-bottom:0}</style><script type=module>
+  const assetRoot = "/aws-mahjong/assets/v2.0.1";
+  const { renderWithOutputTheme } = await import(`${assetRoot}/merjong-wrapper.js`);
+
+  const baseUrl = `${assetRoot}/output/`;
+  const dataUrl = `${assetRoot}/yaku.json`;
+  const list = document.getElementById("yaku-list-v201");
+
+  function renderInto(id, mpsz) {
+    const target = document.getElementById(id);
+    if (!target) {
+      return;
+    }
+    target.innerHTML = renderWithOutputTheme(mpsz, baseUrl);
+  }
+
+  function boolLabel(value) {
+    if (value == true) {
+      return "あり";
+    }
+    if (value == false) {
+      return "なし";
+    }
+    if (value === null || value === undefined || value === "") {
+      return "なし";
+    }
+    return "未設定";
+  }
+
+  function valueLabel(value) {
+    if (value === null || value === undefined || value === "") {
+      return "未設定";
+    }
+    return String(value);
+  }
+
+  function sampleMpszList(yaku) {
+    if (Array.isArray(yaku.sampleMpszList) && yaku.sampleMpszList.length > 0) {
+      return yaku.sampleMpszList;
+    }
+    if (yaku.compositionExampleMpsz) {
+      return [yaku.compositionExampleMpsz];
+    }
+    return [];
+  }
+
+  function buildYakuRow(yaku) {
+    const samples = sampleMpszList(yaku);
+    const name = valueLabel(yaku.name) === "未設定" ? yaku.id : yaku.name;
+    let descriptionBlock = "";
+    if (Array.isArray(yaku.description) && yaku.description.length > 0) {
+      descriptionBlock = yaku.description
+        .map((line) => `<p>${valueLabel(line)}</p>`)
+        .join("");
+    } else {
+      const description = valueLabel(yaku.description);
+      descriptionBlock = description === "未設定" ? "" : `<p>${description}</p>`;
+    }
+    const ponAllowed = yaku.isPonAllowed;
+    const chiAllowed = yaku.isChiAllowed;
+    const canCombine = yaku.isCombineAllowed;
+    const hanOpenBlock =
+      ponAllowed !== true && chiAllowed !== true
+        ? ""
+        : `<span>鳴いた時の飜数: ${valueLabel(yaku.hanOpen)}</span>`;
+    return `
+      <section>
+        <h3>${name}</h3>
+        <b class="yaku-description">${descriptionBlock}</b>
+        <div>
+          <span>ポン: ${boolLabel(ponAllowed)}</span>
+          <span>チー: ${boolLabel(chiAllowed)}</span>
+          <br>
+          <span>飜数: ${valueLabel(yaku.han)}</span>
+          ${hanOpenBlock}
+          <br>
+          <span>複合の有無: ${boolLabel(canCombine)}</span>
+        </div>
+        <div>
+          ${samples.map((_, index) => `<div id="${yaku.id}-${index + 1}"></div>`).join("")}
+        </div>
+      </section>
+    `;
+  }
+
+  async function init() {
+    if (!list) {
+      return;
+    }
+    list.innerHTML = "<p>役データを読み込み中です...</p>";
+
+    try {
+      const response = await fetch(dataUrl);
+      if (!response.ok) {
+        throw new Error(`役データの取得に失敗: ${response.status} ${response.statusText}`);
+      }
+      const payload = await response.json();
+      const yakus = Array.isArray(payload.yakus) ? payload.yakus : [];
+
+      const groups = new Map();
+      yakus.forEach((yaku) => {
+        const hanKey = valueLabel(yaku.han);
+        if (!groups.has(hanKey)) {
+          groups.set(hanKey, []);
+        }
+        groups.get(hanKey).push(yaku);
+      });
+
+      list.innerHTML = Array.from(groups.entries())
+        .map(([hanKey, items]) => {
+          const hanHeading = hanKey === "未設定" ? "飜数未設定" : `${hanKey}飜`;
+          return `
+            <section>
+              <h2>${hanHeading}</h2>
+              ${items.map((yaku) => buildYakuRow(yaku)).join("<hr>")}
+            </section>
+          `;
+        })
+        .join("");
+      yakus.forEach((yaku) => {
+        const samples = sampleMpszList(yaku);
+        if (samples.length === 0) {
+          return;
+        }
+        samples.forEach((sample, index) => {
+          renderInto(`${yaku.id}-${index + 1}`, sample);
+        });
+      });
+    } catch (error) {
+      console.error(error);
+      list.innerHTML = "<p>役データの読み込みに失敗しました。</p>";
+    }
+  }
+
+  init();
+</script><div class=edit-meta><br></div><nav class=pagination><a class="nav nav-prev" href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/tile/ title=牌一覧><i class="fas fa-arrow-left" aria-hidden=true></i>&nbsp;Prev - 牌一覧</a>
+<a class="nav nav-next" href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/search/ title=役検索>Next - 役検索 <i class="fas fa-arrow-right" aria-hidden=true></i></a></nav><footer><p class=powered>Powered by <a href=https://gohugo.io>Hugo</a>. Theme by <a href=https://themes.gohugo.io/hugo-theme-techdoc/>TechDoc</a>. Designed by <a href=https://github.com/thingsym/hugo-theme-techdoc>Thingsym</a>.</p></footer></main><div class=sidebar><nav class=slide-menu><ul><li><a href=https://mu7889yoon.github.io/aws-mahjong/>Home</a></li><li class="parent has-sub-menu"><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/>v2.0.1<span class="mark opened">-</span></a><ul class=sub-menu><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/rule/>ルール</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/tile/>牌一覧</a></li><li class=active><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/yaku/>役一覧</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.1/search/>役検索</a></li></ul></li><li class=has-sub-menu><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.0/>v2.0.0<span class="mark closed">+</span></a><ul class=sub-menu><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.0/rule/>ルール</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.0/tile/>牌一覧</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.0/yaku/>役一覧</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/v2.0.0/search/>役検索</a></li></ul></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/quick-start/>3分でわかる！麻雀の遊び方</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/rule/>Rule</a></li><li><a href=https://mu7889yoon.github.io/aws-mahjong/download/>Download</a></li></ul></nav><div class=sidebar-footer></div></div></div><a href=# id=backtothetop-fixed class=backtothetop data-backtothetop-duration=600 data-backtothetop-easing=easeOutQuart data-backtothetop-fixed-fadein=1000 data-backtothetop-fixed-fadeout=1000 data-backtothetop-fixed-bottom=10 data-backtothetop-fixed-right=20><span class="fa-layers fa-fw"><i class="fas fa-circle"></i>
+<i class="fas fa-arrow-circle-up"></i></span></a></div></body></html>

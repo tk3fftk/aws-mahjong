@@ -1,0 +1,174 @@
+:root {
+  --bg: #14532d;
+  --panel: #166534;
+  --tile-bg: #fff8dc;
+  --tile-border: #6b3a08;
+  --text: #f7fee7;
+  --accent: #facc15;
+  --danger: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", Meiryo, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1.4rem;
+}
+
+.panel {
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: flex-end;
+}
+
+.tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 60px;
+  background: var(--tile-bg);
+  border: 1.5px solid var(--tile-border);
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  transition: transform 0.1s;
+}
+
+.tile img {
+  max-width: 100%;
+  max-height: 100%;
+  pointer-events: none;
+}
+
+.tile.back {
+  background: linear-gradient(135deg, #2563eb, #1e3a8a);
+}
+
+.tile.discard {
+  width: 30px;
+  height: 42px;
+}
+
+.tile.hand.clickable {
+  cursor: pointer;
+}
+
+.tile.hand.clickable:hover {
+  transform: translateY(-6px);
+}
+
+.tile.draw-separated {
+  margin-left: 12px;
+  background: #fef3c7;
+}
+
+.tile.win-tile {
+  outline: 2px solid var(--accent);
+}
+
+.label {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+
+.status {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  background: var(--accent);
+  color: #1f2937;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: #e5e7eb;
+}
+
+.win-banner {
+  background: #fde68a;
+  color: #1f2937;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.win-banner h2 {
+  margin: 0 0 8px;
+}
+
+.yaku-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.yaku-list li {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed #92400e;
+  padding: 4px 0;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--danger);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  z-index: 10;
+}
