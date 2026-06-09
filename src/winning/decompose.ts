@@ -1,5 +1,20 @@
 import type { Decomposition, Meld, TileId } from "../types";
-import { counts34, indexToTileId, sortTileIds } from "../tiles";
+import {
+  TILE_KIND_COUNT,
+  canStartSequenceAt,
+  counts34,
+  indexToTileId,
+  sortTileIds,
+} from "../tiles";
+
+// 標準形 (4面子1雀頭) の和了牌枚数
+export const HAND_SIZE_WIN = 14;
+// 標準形の面子数
+const MELDS_PER_HAND = 4;
+// 刻子は同種3枚
+const PON_SIZE = 3;
+// 雀頭は同種2枚
+const PAIR_SIZE = 2;
 
 /**
  * 14枚の牌(ソート不問)を4面子1雀頭の標準形に分解する。
@@ -7,13 +22,13 @@ import { counts34, indexToTileId, sortTileIds } from "../tiles";
  * 分解不能なら空配列。
  */
 export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
-  if (tileIds.length !== 14) return [];
+  if (tileIds.length !== HAND_SIZE_WIN) return [];
   const counts = counts34(tileIds);
   const found: Decomposition[] = [];
 
-  for (let pairIdx = 0; pairIdx < 34; pairIdx++) {
-    if (counts[pairIdx]! < 2) continue;
-    counts[pairIdx]! -= 2;
+  for (let pairIdx = 0; pairIdx < TILE_KIND_COUNT; pairIdx++) {
+    if (counts[pairIdx]! < PAIR_SIZE) continue;
+    counts[pairIdx]! -= PAIR_SIZE;
     const pair: Meld = {
       kind: "pair",
       tiles: [indexToTileId(pairIdx), indexToTileId(pairIdx)],
@@ -22,7 +37,7 @@ export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
     if (tryDecomposeMelds(counts, 0, melds)) {
       found.push({ melds: melds.map(cloneMeld), pair });
     }
-    counts[pairIdx]! += 2;
+    counts[pairIdx]! += PAIR_SIZE;
   }
 
   return dedupe(found);
@@ -30,37 +45,34 @@ export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
 
 function tryDecomposeMelds(counts: Int8Array, start: number, melds: Meld[]): boolean {
   let i = start;
-  while (i < 34 && counts[i]! === 0) i++;
-  if (i >= 34) return melds.length === 4;
-  if (melds.length === 4) return false;
+  while (i < TILE_KIND_COUNT && counts[i]! === 0) i++;
+  if (i >= TILE_KIND_COUNT) return melds.length === MELDS_PER_HAND;
+  if (melds.length === MELDS_PER_HAND) return false;
 
   // 刻子
-  if (counts[i]! >= 3) {
-    counts[i]! -= 3;
+  if (counts[i]! >= PON_SIZE) {
+    counts[i]! -= PON_SIZE;
     const id = indexToTileId(i);
     melds.push({ kind: "pon", tiles: [id, id, id] });
     if (tryDecomposeMelds(counts, i, melds)) return true;
     melds.pop();
-    counts[i]! += 3;
+    counts[i]! += PON_SIZE;
   }
 
-  // 順子(数牌のみ・同種suit内のみ)
-  if (i < 27) {
-    const n = (i % 9) + 1;
-    if (n <= 7 && counts[i + 1]! >= 1 && counts[i + 2]! >= 1) {
-      counts[i]!--;
-      counts[i + 1]!--;
-      counts[i + 2]!--;
-      melds.push({
-        kind: "chi",
-        tiles: [indexToTileId(i), indexToTileId(i + 1), indexToTileId(i + 2)],
-      });
-      if (tryDecomposeMelds(counts, i, melds)) return true;
-      melds.pop();
-      counts[i]!++;
-      counts[i + 1]!++;
-      counts[i + 2]!++;
-    }
+  // 順子 (数牌のみ・同種suit内のみ)。canStartSequenceAt が両条件を集約。
+  if (canStartSequenceAt(i) && counts[i + 1]! >= 1 && counts[i + 2]! >= 1) {
+    counts[i]!--;
+    counts[i + 1]!--;
+    counts[i + 2]!--;
+    melds.push({
+      kind: "chi",
+      tiles: [indexToTileId(i), indexToTileId(i + 1), indexToTileId(i + 2)],
+    });
+    if (tryDecomposeMelds(counts, i, melds)) return true;
+    melds.pop();
+    counts[i]!++;
+    counts[i + 1]!++;
+    counts[i + 2]!++;
   }
 
   return false;

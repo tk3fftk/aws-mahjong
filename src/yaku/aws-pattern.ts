@@ -1,5 +1,5 @@
 import type { TileId, WinForm, YakuResult } from "../types";
-import { counts34, mpszToTiles } from "../tiles";
+import { TILE_KIND_COUNT, counts34, mpszToTiles } from "../tiles";
 import { AWS_YAKU_KIND, type AwsYakuKind } from "./aws-classification";
 import yakuData from "../data/yaku.json";
 
@@ -80,16 +80,19 @@ function matchesAny(
 
 function matchesCountSuperset(handCounts: Int8Array, sample: string): boolean {
   const sampleCounts = counts34(mpszToTiles(sample));
-  for (let i = 0; i < 34; i++) {
+  for (let i = 0; i < TILE_KIND_COUNT; i++) {
     if (handCounts[i]! < sampleCounts[i]!) return false;
   }
   return true;
 }
 
+// 七対子: サンプル形式 "AA-BB-CC-..." と手の対子集合が一致するか
+const SEVEN_PAIRS_COUNT = 7;
+
 function matchesSevenPairsSample(handPairs: TileId[], sample: string): boolean {
-  if (handPairs.length !== 7) return false;
+  if (handPairs.length !== SEVEN_PAIRS_COUNT) return false;
   const segments = sample.split("-");
-  if (segments.length !== 7) return false;
+  if (segments.length !== SEVEN_PAIRS_COUNT) return false;
   const sampleFirstTile = segments.map((seg) => {
     const tiles = mpszToTiles(seg);
     return tiles[0];

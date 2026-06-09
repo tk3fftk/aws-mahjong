@@ -1,5 +1,6 @@
 import type { Tile, WinForm, YakuResult, SeatWind } from "../types";
 import { isYaochu } from "../tiles";
+import { YAKUMAN_HAN_THRESHOLD } from "../score";
 import { judgeStandardYakus, type YakuContext } from "./standard";
 import { detectAwsYakus } from "./aws-pattern";
 import { isAwsYakuId } from "./aws-classification";
@@ -26,9 +27,9 @@ export function judgeYaku(
 
   if (winForm.kind === "thirteen-orphans") {
     const yakus: YakuResult[] = [
-      { id: "kokushi", name: "国士無双", han: 13 },
+      { id: "kokushi", name: "国士無双", han: YAKUMAN_HAN_THRESHOLD },
     ];
-    return { yakus, totalHan: 13, isYakuman: true };
+    return { yakus, totalHan: YAKUMAN_HAN_THRESHOLD, isYakuman: true };
   }
 
   if (winForm.kind === "seven-pairs") {
@@ -79,7 +80,7 @@ export function judgeYaku(
 
 function finalize(yakus: YakuResult[]): JudgeResult {
   const totalHan = yakus.reduce((sum, y) => sum + y.han, 0);
-  const isYakuman = yakus.some((y) => y.han >= 13);
+  const isYakuman = yakus.some((y) => y.han >= YAKUMAN_HAN_THRESHOLD);
   return { yakus, totalHan, isYakuman };
 }
 

@@ -1,3 +1,6 @@
+// 役満の飜数閾値。これ以上の han は役満扱いとして単一料金 (32000/48000) になる。
+export const YAKUMAN_HAN_THRESHOLD = 13;
+
 export interface ScoreInput {
   totalHan: number;
   isDealer: boolean;
@@ -31,7 +34,7 @@ const TABLE: Entry[] = [
   { han: 6,  ko_ron: 12000, ko_tsumo: [6000, 3000],  oya_ron: 18000, oya_tsumo: 6000 },
   { han: 8,  ko_ron: 16000, ko_tsumo: [8000, 4000],  oya_ron: 24000, oya_tsumo: 8000 },
   { han: 11, ko_ron: 24000, ko_tsumo: [12000, 6000], oya_ron: 36000, oya_tsumo: 12000 },
-  { han: 13, ko_ron: 32000, ko_tsumo: [16000, 8000], oya_ron: 48000, oya_tsumo: 16000 },
+  { han: YAKUMAN_HAN_THRESHOLD, ko_ron: 32000, ko_tsumo: [16000, 8000], oya_ron: 48000, oya_tsumo: 16000 },
 ];
 
 function pickEntry(han: number): Entry {

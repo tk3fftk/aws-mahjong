@@ -13,6 +13,9 @@ import { judgeYaku, canDeclareWin } from "./yaku/judge";
 import { decideCpuAction } from "./cpu";
 import { calcScore } from "./score";
 
+// 各プレイヤーの初期持ち点 (麻雀標準)
+const INITIAL_SCORE = 25000;
+
 export interface GameControllerOptions {
   seed?: number;
   onChange?: (state: GameState) => void;
@@ -192,8 +195,8 @@ function createInitialState(): GameState {
   return {
     wall: [],
     players: {
-      east: makePlayer("east", true, [], 25000),
-      south: makePlayer("south", false, [], 25000),
+      east: makePlayer("east", true, [], INITIAL_SCORE),
+      south: makePlayer("south", false, [], INITIAL_SCORE),
     },
     turn: "east",
     roundWind: "1z",

@@ -1,6 +1,15 @@
 import type { Tile, TileId, Copy } from "./types";
 import { ALL_TILE_IDS } from "./tiles";
 
+// 同種牌が何枚あるか (麻雀標準: 各種4枚 = 4コピー)
+const TILE_COPIES_PER_KIND = 4;
+// 標準麻雀の席数 (2人対戦でも 4人配牌を流用するため4)
+const NUM_SEATS = 4;
+// 配牌の4-4-4 = 3周
+const INITIAL_DEAL_ROUNDS = 3;
+// 1周あたり各家に配る枚数
+const TILES_PER_DEAL_ROUND = 4;
+
 export type RNG = () => number;
 
 /**
@@ -24,7 +33,7 @@ export function mulberry32(seed: number): RNG {
 export function buildWall(rng: RNG): Tile[] {
   const tiles: Tile[] = [];
   for (const id of ALL_TILE_IDS) {
-    for (let c = 0; c < 4; c++) {
+    for (let c = 0; c < TILE_COPIES_PER_KIND; c++) {
       tiles.push({ id, copy: c as Copy });
     }
   }
@@ -51,14 +60,14 @@ export interface DealtHands {
 export function dealInitialHands(wall: Tile[]): DealtHands {
   const work = [...wall];
   const seats: [Tile[], Tile[], Tile[], Tile[]] = [[], [], [], []]; // east, south, west, north
-  // 4-4-4: 各家に4枚ずつを3周配る
-  for (let round = 0; round < 3; round++) {
-    for (let s = 0; s < 4; s++) {
-      for (let k = 0; k < 4; k++) seats[s]!.push(work.shift()!);
+  // 4-4-4: 各家に TILES_PER_DEAL_ROUND 枚ずつを INITIAL_DEAL_ROUNDS 周配る
+  for (let round = 0; round < INITIAL_DEAL_ROUNDS; round++) {
+    for (let s = 0; s < NUM_SEATS; s++) {
+      for (let k = 0; k < TILES_PER_DEAL_ROUND; k++) seats[s]!.push(work.shift()!);
     }
   }
   // 最後の1巡: 各家に1枚ずつ
-  for (let s = 0; s < 4; s++) seats[s]!.push(work.shift()!);
+  for (let s = 0; s < NUM_SEATS; s++) seats[s]!.push(work.shift()!);
   // 親の初ツモ (14枚目)
   seats[0]!.push(work.shift()!);
 

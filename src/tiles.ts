@@ -1,5 +1,29 @@
 import type { TileId, Tile, Suit } from "./types";
 
+// 牌の総種類数 (1m..9m, 1p..9p, 1s..9s, 1z..7z)
+export const TILE_KIND_COUNT = 34;
+
+// 数牌1 suit あたりの種類数 (1〜9)
+export const NUMBERED_TILES_PER_SUIT = 9;
+
+// 字牌の種類数 (東/南/西/北/白/發/中 = 1z..7z)
+export const HONOR_TILE_COUNT = 7;
+
+// counts34 配列における suit の開始 index
+//   m: 0..8, p: 9..17, s: 18..26, z: 27..33
+export const SUIT_INDEX_OFFSET: Record<Suit, number> = {
+  m: 0,
+  p: NUMBERED_TILES_PER_SUIT,
+  s: NUMBERED_TILES_PER_SUIT * 2,
+  z: NUMBERED_TILES_PER_SUIT * 3,
+};
+
+// 字牌の開始 index (= 数牌3種ぶん埋まった直後)
+export const HONOR_START_INDEX = SUIT_INDEX_OFFSET.z;
+
+// 順子の開始牌として使える最大数 (1m2m3m..7m8m9m が成立、8/9始まりは不可)
+export const MAX_SEQUENCE_START_NUMBER = 7;
+
 const SUIT_ORDER: Record<Suit, number> = { m: 0, p: 1, s: 2, z: 3 };
 
 /**
@@ -105,9 +129,9 @@ export function isWind(id: TileId): boolean {
 export const ALL_TILE_IDS: TileId[] = (() => {
   const out: TileId[] = [];
   for (const s of ["m", "p", "s"] as const) {
-    for (let n = 1; n <= 9; n++) out.push(`${n}${s}` as TileId);
+    for (let n = 1; n <= NUMBERED_TILES_PER_SUIT; n++) out.push(`${n}${s}` as TileId);
   }
-  for (let n = 1; n <= 7; n++) out.push(`${n}z` as TileId);
+  for (let n = 1; n <= HONOR_TILE_COUNT; n++) out.push(`${n}z` as TileId);
   return out;
 })();
 
@@ -156,21 +180,30 @@ export function tileImageUrl(id: TileId): string {
 }
 
 export function tileIdIndex(id: TileId): number {
-  // 0..33: 1m=0..9m=8, 1p=9..9p=17, 1s=18..9s=26, 1z=27..7z=33
-  const s = suitOf(id);
-  const n = numberOf(id);
-  if (s === "m") return n - 1;
-  if (s === "p") return 9 + n - 1;
-  if (s === "s") return 18 + n - 1;
-  return 27 + n - 1;
+  return SUIT_INDEX_OFFSET[suitOf(id)] + (numberOf(id) - 1);
 }
 
 export function indexToTileId(idx: number): TileId {
   return ALL_TILE_IDS[idx]!;
 }
 
+/** counts34 配列の index i から牌の数字 (数牌1..9 / 字牌1..7) を取り出す */
+export function numberFromIndex(i: number): number {
+  if (i >= HONOR_START_INDEX) return i - HONOR_START_INDEX + 1;
+  return (i % NUMBERED_TILES_PER_SUIT) + 1;
+}
+
+/**
+ * index i が「順子の開始位置として有効」かを判定する。
+ * 成立条件: (a) 数牌である (字牌では順子不可) かつ (b) 開始数字が 1..7
+ * (8 や 9 から始まると 3牌目が次の suit に跨いでしまうため)
+ */
+export function canStartSequenceAt(i: number): boolean {
+  return i < HONOR_START_INDEX && numberFromIndex(i) <= MAX_SEQUENCE_START_NUMBER;
+}
+
 export function counts34(ids: TileId[]): Int8Array {
-  const out = new Int8Array(34);
+  const out = new Int8Array(TILE_KIND_COUNT);
   for (const id of ids) {
     const i = tileIdIndex(id);
     out[i] = (out[i] ?? 0) + 1;
