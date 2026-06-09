@@ -6,6 +6,11 @@
   --text: #f7fee7;
   --accent: #facc15;
   --danger: #f87171;
+  --tile-w: clamp(44px, 6.5vw, 56px);
+  --tile-h: clamp(62px, 9.3vw, 80px);
+  --tile-discard-w: clamp(32px, 4.5vw, 40px);
+  --tile-discard-h: clamp(46px, 6.4vw, 56px);
+  --tile-gap: 6px;
 }
 
 * {
@@ -44,16 +49,17 @@ h1 {
 .row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--tile-gap);
   align-items: flex-end;
 }
 
 .tile {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 60px;
+  width: var(--tile-w);
+  height: var(--tile-h);
   background: var(--tile-bg);
   border: 1.5px solid var(--tile-border);
   border-radius: 6px;
@@ -61,7 +67,8 @@ h1 {
   overflow: hidden;
   cursor: default;
   user-select: none;
-  transition: transform 0.1s;
+  transform-origin: center bottom;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .tile img {
@@ -75,16 +82,28 @@ h1 {
 }
 
 .tile.discard {
-  width: 30px;
-  height: 42px;
+  width: var(--tile-discard-w);
+  height: var(--tile-discard-h);
 }
 
 .tile.hand.clickable {
   cursor: pointer;
 }
 
+.tile:hover {
+  transform: scale(1.25);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+  z-index: 5;
+}
+
 .tile.hand.clickable:hover {
-  transform: translateY(-6px);
+  transform: translateY(-6px) scale(1.25);
+}
+
+.tile.back:hover {
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  z-index: auto;
 }
 
 .tile.draw-separated {
