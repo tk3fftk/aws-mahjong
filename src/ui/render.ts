@@ -1,6 +1,7 @@
 import type { GameState, Tile, WinInfo, Seat } from "../types";
 import { AWS_NAMES } from "../tiles";
 import { renderTile, renderTileById } from "./tile-view";
+import { openYakuHelp } from "./yaku-help";
 
 export interface RenderHandlers {
   onDiscard: (index: number) => void;
@@ -30,7 +31,10 @@ export function render(root: HTMLElement, state: GameState, handlers: RenderHand
         : turnLabel;
 
   root.innerHTML = `
-    <h1>AWS Mahjong (二人対戦MVP)</h1>
+    <header class="app-header">
+      <h1>AWS Mahjong (二人対戦MVP)</h1>
+      <button data-action="show-yaku-help" class="help-btn" aria-label="役一覧を表示">?</button>
+    </header>
     <div class="panel">
       <div class="status">
         <span>場風: ${ROUND_WIND_NAME[state.roundWind]}</span>
@@ -135,6 +139,9 @@ function attachHandlers(root: HTMLElement, state: GameState, handlers: RenderHan
   });
   root.querySelector<HTMLButtonElement>('button[data-action="new-round"]')?.addEventListener("click", () => {
     handlers.onNewRound();
+  });
+  root.querySelector<HTMLButtonElement>('button[data-action="show-yaku-help"]')?.addEventListener("click", () => {
+    openYakuHelp();
   });
 }
 

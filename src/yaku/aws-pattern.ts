@@ -3,7 +3,7 @@ import { TILE_KIND_COUNT, counts34, mpszToTiles } from "../tiles";
 import { AWS_YAKU_KIND, type AwsYakuKind } from "./aws-classification";
 import yakuData from "../data/yaku.json";
 
-interface YakuJsonEntry {
+export interface YakuJsonEntry {
   id: string;
   name: string;
   han: number;
@@ -19,7 +19,7 @@ interface YakuJsonShape {
   yakus: YakuJsonEntry[];
 }
 
-const YAKU_LIST: YakuJsonEntry[] = (yakuData as YakuJsonShape).yakus;
+export const YAKU_LIST: YakuJsonEntry[] = (yakuData as YakuJsonShape).yakus;
 
 export interface AwsPatternContext {
   isMenzen: boolean;

@@ -34,8 +34,28 @@ body {
 }
 
 h1 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 1.4rem;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.help-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .panel {
@@ -190,4 +210,106 @@ button.secondary {
   border-radius: 8px;
   font-weight: 600;
   z-index: 10;
+}
+
+.yaku-help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.yaku-help-content {
+  width: min(720px, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.yaku-help-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  padding: 16px;
+  z-index: 1;
+}
+
+.yaku-help-list {
+  padding: 0 16px 16px;
+}
+
+.yaku-help-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.yaku-help-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 10px 0;
+}
+
+.yaku-help-item:first-child {
+  border-top: none;
+}
+
+.yaku-help-item-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.yaku-help-name {
+  font-weight: 600;
+}
+
+.yaku-help-han {
+  background: var(--accent);
+  color: #1f2937;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.yaku-help-kind {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  margin: 2px 0 6px;
+}
+
+.yaku-help-sample {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.yaku-help-sample + .yaku-help-sample {
+  margin-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  padding-top: 6px;
+}
+
+.yaku-help-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--tile-gap);
+}
+
+.yaku-help-sample .tile:hover {
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  z-index: auto;
 }
