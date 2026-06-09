@@ -51,17 +51,20 @@ export class GameController {
   startNewRound(): void {
     const wall = buildWall(this.#rng);
     const dealt = dealInitialHands(wall);
+    const eastInitialDraw = dealt.east[dealt.east.length - 1] ?? null;
+    const eastSortedRest = sortTiles(dealt.east.slice(0, -1));
+    const eastHand = eastInitialDraw ? [...eastSortedRest, eastInitialDraw] : eastSortedRest;
     this.#state = {
       wall: dealt.remainingWall,
       players: {
-        east: makePlayer("east", true, sortTiles(dealt.east), this.#state.players.east.score),
+        east: makePlayer("east", true, eastHand, this.#state.players.east.score),
         south: makePlayer("south", false, sortTiles(dealt.south), this.#state.players.south.score),
       },
       turn: "east",
       roundWind: "1z",
       roundIndex: 0,
       phase: "discard",
-      lastDrawTile: dealt.east[dealt.east.length - 1] ?? null,
+      lastDrawTile: eastInitialDraw,
       winInfo: null,
     };
     this.#emit();
@@ -140,8 +143,7 @@ export class GameController {
       return;
     }
     const player = this.#state.players[nextSeat];
-    player.hand.push(drawn.tile);
-    player.hand = sortTiles(player.hand);
+    player.hand = [...sortTiles(player.hand), drawn.tile];
     this.#state.lastDrawTile = drawn.tile;
     this.#state.phase = "discard";
 

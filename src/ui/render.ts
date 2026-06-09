@@ -80,12 +80,12 @@ function humanPanel(state: GameState): string {
   // 最新ツモ牌は手牌末尾。視覚的に分離するため、末尾とそれ以外を分けて描画。
   const handHtml = east.hand
     .map((t, i) => {
-      const isLast = lastDraw && t.id === lastDraw.id && i === east.hand.length - 1;
+      const isDrawn = lastDraw !== null && i === east.hand.length - 1;
       return renderTile(t, {
         variant: "hand",
         clickable: isMyTurn,
         index: i,
-        highlight: !!isLast,
+        highlight: isDrawn,
       });
     })
     .join("");
