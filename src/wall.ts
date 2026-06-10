@@ -49,13 +49,14 @@ export function buildWall(rng: RNG): Tile[] {
 export interface DealtHands {
   east: Tile[];
   south: Tile[];
+  west: Tile[];
+  north: Tile[];
   remainingWall: Tile[];
 }
 
 /**
- * 4人配牌を山先頭から実施し、east=14枚 (親)、south=13枚 (子) を返す。
- * 西家・北家分の計26枚は捨てる (空席扱い)。残り山は標準麻雀と同じ感覚で
- * 親の初ツモ済みの状態 (=山残り83枚) になる。
+ * 4人配牌を山先頭から実施し、east=14枚 (親・初ツモ込み)、他3家=各13枚を返す。
+ * 残り山は親の初ツモ済みの状態 (=83枚)。王牌の分離は splitDeadWall で行う。
  */
 export function dealInitialHands(wall: Tile[]): DealtHands {
   const work = [...wall];
@@ -71,7 +72,27 @@ export function dealInitialHands(wall: Tile[]): DealtHands {
   // 親の初ツモ (14枚目)
   seats[0]!.push(work.shift()!);
 
-  return { east: seats[0]!, south: seats[1]!, remainingWall: work };
+  return {
+    east: seats[0]!,
+    south: seats[1]!,
+    west: seats[2]!,
+    north: seats[3]!,
+    remainingWall: work,
+  };
+}
+
+// 王牌 (デッドウォール) の枚数。ドラ表示は未実装だが将来の予約として標準の14枚を確保する
+export const DEAD_WALL_SIZE = 14;
+
+export interface WallSplit {
+  liveWall: Tile[];
+  deadWall: Tile[];
+}
+
+/** 配牌後の山の末尾 DEAD_WALL_SIZE 枚を王牌として分離する */
+export function splitDeadWall(wall: Tile[]): WallSplit {
+  const cut = Math.max(0, wall.length - DEAD_WALL_SIZE);
+  return { liveWall: wall.slice(0, cut), deadWall: wall.slice(cut) };
 }
 
 export interface DrawResult {
@@ -83,4 +104,10 @@ export function drawFromWall(wall: Tile[]): DrawResult {
   if (wall.length === 0) return { tile: null, remainingWall: wall };
   const [tile, ...rest] = wall;
   return { tile: tile!, remainingWall: rest };
+}
+
+/** 山の末尾から1枚ツモる (カン後のリンシャンツモ用) */
+export function drawFromWallEnd(wall: Tile[]): DrawResult {
+  if (wall.length === 0) return { tile: null, remainingWall: wall };
+  return { tile: wall[wall.length - 1]!, remainingWall: wall.slice(0, -1) };
 }

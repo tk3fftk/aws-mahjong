@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildWall, dealInitialHands, mulberry32, drawFromWall } from "./wall";
+import {
+  buildWall,
+  dealInitialHands,
+  mulberry32,
+  drawFromWall,
+  drawFromWallEnd,
+  splitDeadWall,
+  DEAD_WALL_SIZE,
+} from "./wall";
 
 describe("buildWall", () => {
   it("136枚を生成する (34種 × 4)", () => {
@@ -21,13 +29,50 @@ describe("buildWall", () => {
 });
 
 describe("dealInitialHands", () => {
-  it("親(east)=14枚, 子(south)=13枚, 山残り=84枚", () => {
+  it("親(east)=14枚, 子(south/west/north)=各13枚, 山残り=83枚", () => {
     const wall = buildWall(mulberry32(7));
-    const { east, south, remainingWall } = dealInitialHands(wall);
+    const { east, south, west, north, remainingWall } = dealInitialHands(wall);
     expect(east).toHaveLength(14);
     expect(south).toHaveLength(13);
+    expect(west).toHaveLength(13);
+    expect(north).toHaveLength(13);
     // 136 - 52 (4人各13枚) - 1 (親の初ツモ) = 83
     expect(remainingWall).toHaveLength(83);
+  });
+
+  it("配牌 + 山 = 136枚で重複なし", () => {
+    const wall = buildWall(mulberry32(11));
+    const { east, south, west, north, remainingWall } = dealInitialHands(wall);
+    const all = [...east, ...south, ...west, ...north, ...remainingWall];
+    expect(all).toHaveLength(136);
+    expect(new Set(all.map((t) => `${t.id}:${t.copy}`)).size).toBe(136);
+  });
+});
+
+describe("splitDeadWall", () => {
+  it("末尾14枚を王牌として分離し、順序を保つ", () => {
+    const wall = buildWall(mulberry32(3));
+    const { remainingWall } = dealInitialHands(wall);
+    const { liveWall, deadWall } = splitDeadWall(remainingWall);
+    expect(deadWall).toHaveLength(DEAD_WALL_SIZE);
+    expect(liveWall).toHaveLength(83 - DEAD_WALL_SIZE); // 69
+    expect([...liveWall, ...deadWall]).toEqual(remainingWall);
+  });
+});
+
+describe("drawFromWallEnd", () => {
+  it("末尾から1枚ツモる (リンシャン用)", () => {
+    const wall = buildWall(mulberry32(5));
+    const last = wall[wall.length - 1];
+    const { tile, remainingWall } = drawFromWallEnd(wall);
+    expect(tile).toEqual(last);
+    expect(remainingWall).toHaveLength(wall.length - 1);
+    expect(remainingWall[0]).toEqual(wall[0]);
+  });
+
+  it("山が空ならnull", () => {
+    const { tile } = drawFromWallEnd([]);
+    expect(tile).toBeNull();
   });
 });
 
