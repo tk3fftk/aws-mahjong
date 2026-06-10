@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { judgeYaku, hasAnyAwsYaku, canDeclareWin } from "./judge";
 import { canWin } from "../winning/check";
+import { effectiveHandTiles, isMenzenHand } from "../winning/melds";
 import { mpszToTiles } from "../tiles";
-import type { Tile } from "../types";
+import type { MeldLike, Tile } from "../types";
 
 function toHand(mpsz: string): Tile[] {
   return mpszToTiles(mpsz).map((id) => ({ id, copy: 0 as const }));
+}
+
+function meld(kind: MeldLike["kind"], mpsz: string): MeldLike {
+  return { kind, tiles: toHand(mpsz) };
 }
 
 const baseCtx = {
@@ -76,5 +81,78 @@ describe("judgeYaku", () => {
     const result = judgeYaku(winForm, hand, baseCtx);
     // Kiro(1) + 平和は刻子があるので付かない + 門前清自摸和(1) + 断么九は字牌5zありで付かない
     expect(result.totalHan).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
+  // ゲーム層の組み立て規約をそのまま再現するヘルパ
+  function judgeWithMelds(
+    concealedMpsz: string,
+    melds: MeldLike[],
+    opts: { isTsumo: boolean },
+  ) {
+    const concealed = toHand(concealedMpsz);
+    const winForm = canWin(concealed, melds)!;
+    expect(winForm).toBeTruthy();
+    const allTiles = effectiveHandTiles(concealed, melds);
+    return judgeYaku(winForm, allTiles, {
+      isTsumo: opts.isTsumo,
+      isMenzen: isMenzenHand(melds),
+      seatWind: "1z",
+      roundWind: "1z",
+    });
+  }
+
+  it("5z ポン → ツモ: kiro は hanOpen=1 で成立、門前清自摸和は付かない", () => {
+    const result = judgeWithMelds("234m567m234p55s", [meld("pon", "555z")], {
+      isTsumo: true,
+    });
+    expect(result.yakus.find((y) => y.id === "kiro")?.han).toBe(1);
+    expect(result.yakus.find((y) => y.id === "menzen-tsumo")).toBeUndefined();
+    expect(canDeclareWin(result.yakus, result.isYakuman)).toBe(true);
+  });
+
+  it("完全門前ロン: 平和は成立し、門前清自摸和は付かない", () => {
+    // 全順子 + 非役牌雀頭 (5s) + 両面待ち相当の形
+    const hand = toHand("234m567m234p678p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, {
+      isTsumo: false,
+      isMenzen: true,
+      seatWind: "1z",
+      roundWind: "1z",
+    });
+    expect(result.yakus.find((y) => y.id === "pinfu")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "menzen-tsumo")).toBeUndefined();
+  });
+
+  it("チー1組のロン: 平和は付かず、清一色は 5飜に食い下がる", () => {
+    const result = judgeWithMelds("234m567m789m99m", [meld("chi", "123m")], {
+      isTsumo: false,
+    });
+    expect(result.yakus.find((y) => y.id === "pinfu")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "chinitsu")?.han).toBe(5);
+  });
+
+  it("明槓 + ポン×2 + 暗刻: カンは刻子扱いで対々和が成立する", () => {
+    const result = judgeWithMelds("222m55s", [
+      meld("minkan", "1111z"),
+      meld("pon", "555z"),
+      meld("pon", "777s"),
+    ], { isTsumo: true });
+    expect(result.yakus.find((y) => y.id === "toitoi")).toBeTruthy();
+    // 1z 明槓 (東場・東家) は場風+自風で各1飜
+    expect(result.yakus.find((y) => y.id === "round-wind")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "seat-wind")).toBeTruthy();
+  });
+
+  it("暗槓のみの手は門前扱い: 門前清自摸和が成立する", () => {
+    const concealed = toHand("234m567m234p55s");
+    const melds = [meld("ankan", "5555z")];
+    const result = judgeWithMelds("234m567m234p55s", melds, { isTsumo: true });
+    expect(isMenzenHand(melds)).toBe(true);
+    expect(result.yakus.find((y) => y.id === "menzen-tsumo")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "kiro")?.han).toBe(1);
+    expect(concealed).toHaveLength(11);
   });
 });

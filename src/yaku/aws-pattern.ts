@@ -48,7 +48,9 @@ export function detectAwsYakus(
 
     if (!matchesAny(entry, kind, handCounts, winForm)) continue;
 
-    const han = ctx.isMenzen ? entry.han : entry.hanOpen ?? entry.han;
+    // hanOpen=null は「門前限定」の意味 (yaku.json の規約)。鳴き手では不成立
+    if (!ctx.isMenzen && entry.hanOpen === null) continue;
+    const han = ctx.isMenzen ? entry.han : entry.hanOpen!;
     results.push({ id: entry.id, name: entry.name, han });
   }
 

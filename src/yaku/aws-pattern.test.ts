@@ -100,6 +100,28 @@ describe("detectAwsYakus / seven-pairs 分類", () => {
   });
 });
 
+describe("detectAwsYakus / 鳴き (isMenzen=false) と hanOpen", () => {
+  it("kiro: hanOpen=1 なので鳴いても 1飜", () => {
+    const yakus = detectFromMpsz("555z234m567m234p55s", { isMenzen: false });
+    expect(yakus.find((y) => y.id === "kiro")?.han).toBe(1);
+  });
+
+  it("cicd-pipeline: 鳴くと hanOpen=1 に食い下がる (門前は 2飜)", () => {
+    const yakus = detectFromMpsz("789p234m567m234s55z", { isMenzen: false });
+    expect(yakus.find((y) => y.id === "cicd-pipeline")?.han).toBe(1);
+  });
+
+  it("static-site-hosting: hanOpen=null (門前限定) なので鳴くと不成立", () => {
+    const yakus = detectFromMpsz("345p234m567m345s55z", { isMenzen: false });
+    expect(yakus.find((y) => y.id === "static-site-hosting")).toBeUndefined();
+  });
+
+  it("redundancy: hanOpen=null なので鳴くと不成立", () => {
+    const yakus = detectFromMpsz("333p222m777s234p55s", { isMenzen: false });
+    expect(yakus.find((y) => y.id === "redundancy")).toBeUndefined();
+  });
+});
+
 describe("detectAwsYakus / isCombineAllowed", () => {
   it("Kiro と コスト最適化 は AWS固有役同士なので両方加算される", () => {
     // yaku.json の isCombineAllowed=false は「標準麻雀の白/發/中 と複合しない」の意。
