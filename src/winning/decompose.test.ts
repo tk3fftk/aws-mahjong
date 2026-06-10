@@ -13,11 +13,22 @@ describe("decomposeStandard", () => {
     expect(first.melds.every((m) => m.kind === "chi")).toBe(true);
   });
 
-  it("純刻子手 '111m 222m 333m 444p 55s' は4刻子+対子で分解できる", () => {
+  it("純刻子手 '111m 222m 333m 444p 55s' は刻子分解と順子分解の両方が見つかる", () => {
+    // 111222333m は [111m,222m,333m] と [123m,123m,123m] の2通りに分解できる
     const result = decomposeStandard(mpszToTiles("111222333m444p55s"));
-    expect(result).toHaveLength(1);
-    expect(result[0]!.melds.every((m) => m.kind === "pon")).toBe(true);
+    expect(result).toHaveLength(2);
+    expect(result.some((d) => d.melds.every((m) => m.kind === "pon"))).toBe(true);
+    expect(
+      result.some((d) => d.melds.filter((m) => m.kind === "chi")).valueOf(),
+    ).toBeTruthy();
     expect(result[0]!.pair.tiles).toEqual(["5s", "5s"]);
+  });
+
+  it("刻子優先で平和形が隠れない: '222333444m 345s 88p' は全順子分解も返す", () => {
+    const result = decomposeStandard(mpszToTiles("222333444m345s88p"));
+    // [222m,333m,444m,345s] と [234m,234m,234m,345s] の両方
+    expect(result.some((d) => d.melds.every((m) => m.kind === "pon" || m.tiles[0] === "3s"))).toBe(true);
+    expect(result.some((d) => d.melds.every((m) => m.kind === "chi"))).toBe(true);
   });
 
   it("分解不能形 '12345678m1234p11s' は空配列を返す", () => {

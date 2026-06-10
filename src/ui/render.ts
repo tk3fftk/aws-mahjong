@@ -341,10 +341,13 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
   });
 }
 
-export function showToast(root: HTMLElement, message: string, durationMs = 2000): void {
+export function showToast(message: string, durationMs = 2000): void {
+  // #app は再描画のたびに innerHTML 全置換されるため、body 直下にマウントして
+  // トーストが表示中に消えないようにする (yaku-help のオーバーレイと同じ理由)
+  document.querySelectorAll(".toast").forEach((el) => el.remove());
   const el = document.createElement("div");
   el.className = "toast";
   el.textContent = message;
-  root.appendChild(el);
+  document.body.appendChild(el);
   setTimeout(() => el.remove(), durationMs);
 }

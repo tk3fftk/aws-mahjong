@@ -37,33 +37,38 @@ export function decomposeStandard(
       kind: "pair",
       tiles: [indexToTileId(pairIdx), indexToTileId(pairIdx)],
     };
-    const melds: Meld[] = [];
-    if (tryDecomposeMelds(counts, 0, melds, meldCount)) {
+    // 全分解を列挙する (最初の1つで打ち切ると、刻子優先の探索順により
+    // 全順子分解 = 平和形が隠れて飜を取りこぼす)
+    collectMeldDecomps(counts, 0, [], meldCount, (melds) => {
       found.push({ melds: melds.map(cloneMeld), pair });
-    }
+    });
     counts[pairIdx]! += PAIR_SIZE;
   }
 
   return dedupe(found);
 }
 
-function tryDecomposeMelds(
+function collectMeldDecomps(
   counts: Int8Array,
   start: number,
   melds: Meld[],
   meldCount: number,
-): boolean {
+  onFound: (melds: Meld[]) => void,
+): void {
   let i = start;
   while (i < TILE_KIND_COUNT && counts[i]! === 0) i++;
-  if (i >= TILE_KIND_COUNT) return melds.length === meldCount;
-  if (melds.length === meldCount) return false;
+  if (i >= TILE_KIND_COUNT) {
+    if (melds.length === meldCount) onFound(melds);
+    return;
+  }
+  if (melds.length === meldCount) return;
 
   // 刻子
   if (counts[i]! >= PON_SIZE) {
     counts[i]! -= PON_SIZE;
     const id = indexToTileId(i);
     melds.push({ kind: "pon", tiles: [id, id, id] });
-    if (tryDecomposeMelds(counts, i, melds, meldCount)) return true;
+    collectMeldDecomps(counts, i, melds, meldCount, onFound);
     melds.pop();
     counts[i]! += PON_SIZE;
   }
@@ -77,14 +82,12 @@ function tryDecomposeMelds(
       kind: "chi",
       tiles: [indexToTileId(i), indexToTileId(i + 1), indexToTileId(i + 2)],
     });
-    if (tryDecomposeMelds(counts, i, melds, meldCount)) return true;
+    collectMeldDecomps(counts, i, melds, meldCount, onFound);
     melds.pop();
     counts[i]!++;
     counts[i + 1]!++;
     counts[i + 2]!++;
   }
-
-  return false;
 }
 
 function cloneMeld(m: Meld): Meld {

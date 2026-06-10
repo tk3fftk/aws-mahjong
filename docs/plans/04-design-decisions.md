@@ -89,3 +89,21 @@
   - `aws-pattern.ts` から `YAKU_LIST` と `YakuJsonEntry` 型を export 化 (UI 側からの再利用)
   - 役一覧 HTML はモジュール初期化時に 1回生成 (`ITEMS_HTML` 定数)。再生成しない
   - アクセシビリティ: `role="dialog"`, `aria-modal`, ESC キーで閉じる, 前フォーカス復帰
+
+---
+
+## D-009: 4人化 + 鳴き/ロンの実装方針
+
+- **What**: 4人対戦・鳴き (ポン/チー/カン)・ロン・基本フリテンを実装 (2026-06)。主な設計選択:
+  1. **反復ループ**: `game.ts` の相互再帰 (`#advanceTurn` ⇄ `#runCpuTurn`) を `#loop()` ドライバに全面置換。「`phase=discard` かつ turn が CPU」の間だけ1手進め、人間入力/claim/終局で停止する。CPU 3連続手番でもスタックが深くならず、claim 割り込みが書ける
+  2. **claim フェーズ**: 打牌ごとに `claims.ts:computeEligibility` で他3席の適格性を計算。CPU は `cpu.ts:decideClaim` で即決し、人間に選択肢があり CPU に先取りされない場合のみ `phase="claim"` で停止
+  3. **優先度と頭ハネ**: ロン > カン=ポン > チー。複数ロンは頭ハネ (打牌者からツモ順で近い1人のみ)。ダブロンは無い
+  4. **`hanOpen=null` は門前限定**: yaku.json の規約。`aws-pattern.ts` は `!isMenzen && hanOpen===null` で不成立にする (従来の `hanOpen ?? han` フォールバックは鳴き導入でバグ化するため修正)。`isPonAllowed`/`isChiAllowed` は記述的フラグとして実装上は参照しない (D-005 の最小解釈と同じ方針)
+  5. **カンは判定上3枚扱い**: `winning/melds.ts:toDecompMeld` が kan を pon(3枚) に射影し「実効手牌=14枚相当」の不変条件を維持。yaku.json に同一牌4枚を要求する sample が無いことを検証済み (例外: `aws-all-green` の 6s×5 要求 sample は既存の到達不能サンプル)
+  6. **王牌**: 配牌後の山の末尾14枚を `deadWall` として固定予約 (ドラ未実装)。リンシャンツモはライブ壁の末尾 (`drawFromWallEnd`) から取り、カン1回ごとにツモ可能数が1減る
+  7. **フリテン履歴**: `Player.discardedIds` (append-only)。鳴かれた牌は河 (`discards`) から消えるが履歴には残る
+- **Why**: 公式ルール (rule.html) が「ポン・チー・カンあり」「ロン・ツモ両方」を定めるため。設計詳細の why は各項に併記
+- **Consequences**:
+  - **スコープ外**: 槍槓 (加槓へのロン)、同巡フリテン、ダブロン、局送り/親交代、リーチ、ドラ、ノーテン罰符 → [05-future-roadmap.md](./05-future-roadmap.md)
+  - CPU の鳴きは軽いヒューリスティック (ロン即取り / AWS役牌のみポン / チーしない / 4枚揃いで暗槓)
+  - テスト用シームとして `GameControllerOptions.wallFactory` (仕込み壁) と `rng` (CPU打牌固定) を追加

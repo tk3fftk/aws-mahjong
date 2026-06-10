@@ -5,9 +5,10 @@ import { render, showToast, type RenderHandlers, type UiState } from "./ui/rende
 const root = document.getElementById("app");
 if (!root) throw new Error("#app not found");
 
-// ?seed=42 で再現可能な局を立てられる (手動テスト用)
-const seedParam = Number(new URLSearchParams(location.search).get("seed"));
-const seed = Number.isFinite(seedParam) && seedParam !== 0 ? seedParam : Date.now();
+// ?seed=42 で再現可能な局を立てられる (手動テスト用)。seed=0 も有効値
+const rawSeed = new URLSearchParams(location.search).get("seed");
+const parsedSeed = rawSeed !== null && rawSeed !== "" ? Number(rawSeed) : NaN;
+const seed = Number.isFinite(parsedSeed) ? parsedSeed : Date.now();
 
 // 手牌の選択状態などゲーム状態に属さない一時的なUI状態。
 const ui: UiState = { selectedHandIndex: null };
@@ -27,7 +28,7 @@ const game = new GameController({
 
 function orToast(result: ActionAttempt): void {
   if (!result.success) {
-    showToast(root!, result.reason ?? "実行できません");
+    showToast(result.reason ?? "実行できません");
   }
 }
 

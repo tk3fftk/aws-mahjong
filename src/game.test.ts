@@ -382,6 +382,22 @@ describe("GameController / ポン・チー", () => {
   });
 });
 
+describe("GameController / CPU の優先順位", () => {
+  it("CPU はツモ和了できるとき暗槓より和了を優先する", () => {
+    const game = riggedGame({
+      east: "2m2m5p5p9p9p1s1s4s4s1z1z2z2z", // 初ツモ 2z を捨てるだけ (south は使えない)
+      south: "1m1m1m2m3m456p555z9s9s", // 4枚目の 1m で和了形 (kiro) かつ暗槓可能
+      wallHead: "1m",
+    });
+    game.humanDiscard(13); // south が 1m をツモ → 暗槓せずツモ和了するべき
+    const s = game.state;
+    expect(s.phase).toBe("win");
+    expect(s.winInfo?.winner).toBe("south");
+    expect(s.winInfo?.isTsumo).toBe(true);
+    expect(s.players.south.melds).toHaveLength(0); // 暗槓していない
+  });
+});
+
 describe("GameController / カン", () => {
   it("暗槓: 宣言するとリンシャンツモで山末尾から補充される", () => {
     const game = riggedGame({

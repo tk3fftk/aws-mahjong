@@ -233,19 +233,11 @@ export class GameController {
     throw new Error("game loop did not settle");
   }
 
-  /** CPU の1手番: ツモ和了 / 暗槓 / 打牌のいずれか1アクション */
+  /** CPU の1手番: ツモ和了 / 暗槓 / 打牌のいずれか1アクション (この優先順) */
   #cpuTurnStep(): void {
     const seat = this.#state.turn;
     const player = this.#state.players[seat];
     const drewThisTurn = this.#state.lastDrawTile !== null;
-    if (drewThisTurn) {
-      // 暗槓: 4枚揃っていれば宣言 (リンシャン後に同席の手番が続く)
-      const ankan = this.#computeSelfKanOptions(player).find((o) => o.kind === "ankan");
-      if (ankan && this.#state.wall.length > 0) {
-        this.#performSelfKan(seat, ankan);
-        return;
-      }
-    }
     const action = decideCpuAction({
       hand: player.hand,
       melds: player.melds,
@@ -261,6 +253,14 @@ export class GameController {
       const result = this.#tryWin(seat, { isTsumo: true });
       if (result.success) return;
       // canDeclareWin は CPU 側でも確認しているため通常は到達しない
+    }
+    if (drewThisTurn) {
+      // 暗槓: 和了できないときだけ宣言 (リンシャン後に同席の手番が続く)
+      const ankan = this.#computeSelfKanOptions(player).find((o) => o.kind === "ankan");
+      if (ankan && this.#state.wall.length > 0) {
+        this.#performSelfKan(seat, ankan);
+        return;
+      }
     }
     const idx = action.action === "discard" ? action.tileIndex : 0;
     this.#discard(seat, idx);
@@ -292,7 +292,7 @@ export class GameController {
     for (const seat of SEAT_ORDER) {
       if (seat === discarder) continue;
       const p = this.#state.players[seat];
-      offersBySeat.set(seat, computeEligibility({
+      const offers = computeEligibility({
         hand: p.hand,
         melds: p.melds,
         discardedIds: p.discardedIds,
@@ -300,7 +300,10 @@ export class GameController {
         isShimocha: nextSeat(discarder) === seat,
         seatWind: SEAT_WIND[seat],
         roundWind: this.#state.roundWind,
-      }));
+      });
+      // リンシャン牌が無いカンは宣言不可 (セルフカン側のガードと揃える)
+      if (this.#state.wall.length === 0) offers.kan = false;
+      offersBySeat.set(seat, offers);
     }
     const cpuClaims: CpuClaim[] = [];
     for (const [seat, offers] of offersBySeat) {
