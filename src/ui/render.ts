@@ -8,7 +8,8 @@ export interface RenderHandlers {
   // ドラッグ&ドロップでの手牌並び替え
   onReorder: (from: number, to: number) => void;
   onDeclareTsumo: () => void;
-  onNewRound: () => void;
+  onNextRound: () => void;
+  onNewMatch: () => void;
   onClaimRon: () => void;
   onClaimPon: () => void;
   onClaimKan: () => void;
@@ -22,14 +23,8 @@ export interface UiState {
   selectedHandIndex: number | null;
 }
 
-const SEAT_NAME: Record<Seat, string> = {
-  east: "あなた (東家)",
-  south: "CPU (南家)",
-  west: "CPU (西家)",
-  north: "CPU (北家)",
-};
-
-// 上段の CPU 並び。左=北家 (上家) なので「左のパネルからチーできる」直感に合う
+// 上段の CPU 並び。物理席は固定で、左=上家 (人間 east の前の手番) なので
+// 「左のパネルからチーできる」直感に合う
 const CPU_GRID_ORDER: Seat[] = ["north", "west", "south"];
 
 const ALL_SEATS: Seat[] = ["east", "south", "west", "north"];
@@ -40,6 +35,11 @@ const ROUND_WIND_NAME: Record<string, string> = {
   "3z": "西",
   "4z": "北",
 };
+
+// 家 (自風) は局送りで回るため、ラベルは player.seatWind から動的に作る
+function seatName(player: Player): string {
+  return `${player.isHuman ? "あなた" : "CPU"} (${ROUND_WIND_NAME[player.seatWind]}家)`;
+}
 
 const MELD_LABEL: Record<CalledMeld["kind"], string> = {
   chi: "チー",
@@ -59,8 +59,9 @@ export function render(
     state.phase === "win" ? "和了!"
     : state.phase === "draw_game" ? "流局"
     : state.phase === "claim" ? "鳴き選択中"
+    : state.phase === "round_end" ? "終局"
     : state.turn === "east" ? "あなたの番"
-    : `${SEAT_NAME[state.turn]}の番`;
+    : `${seatName(state.players[state.turn])}の番`;
 
   root.innerHTML = `
     <header class="app-header">
@@ -69,7 +70,7 @@ export function render(
     </header>
     <div class="panel">
       <div class="status">
-        <span>場風: ${ROUND_WIND_NAME[state.roundWind]}</span>
+        <span>${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</span>
         <span>${phaseLabel}</span>
         <span>山残り: ${state.wall.length}</span>
       </div>
@@ -79,8 +80,9 @@ export function render(
       ${CPU_GRID_ORDER.map((seat) => cpuPanel(state, seat)).join("")}
     </div>
 
-    ${state.phase === "win" && state.winInfo ? winPanel(state.winInfo) : ""}
+    ${state.phase === "win" && state.winInfo ? winPanel(state, state.winInfo) : ""}
     ${state.phase === "draw_game" ? `<div class="panel"><h2>流局</h2><p>山が尽きました。誰も和了できませんでした。</p></div>` : ""}
+    ${state.phase === "round_end" ? roundEndPanel(state) : ""}
 
     ${humanPanel(state, ui)}
 
@@ -102,7 +104,7 @@ function cpuPanel(state: GameState, seat: Seat): string {
     .join("");
   return `
     <section class="panel seat-panel${active}" data-seat="${seat}">
-      <div class="label">${SEAT_NAME[seat]} ・ ${player.hand.length}枚</div>
+      <div class="label">${seatName(player)} ・ ${player.hand.length}枚</div>
       <div class="row">${backs}</div>
       ${meldsRow(player)}
       <div class="label" style="margin-top: 8px;">捨て牌</div>
@@ -134,7 +136,7 @@ function humanPanel(state: GameState, ui: UiState): string {
     .join("");
   return `
     <section class="panel seat-panel human${isMyTurn ? " active" : ""}" data-seat="east">
-      <div class="label">${SEAT_NAME.east} ・ 手牌 ${east.hand.length} 枚</div>
+      <div class="label">${seatName(east)} ・ 手牌 ${east.hand.length} 枚</div>
       <div class="row">${handHtml}</div>
       ${meldsRow(east)}
       <div class="label" style="margin-top: 8px;">捨て牌</div>
@@ -206,7 +208,7 @@ function actionsHtml(state: GameState): string {
       .join("");
     return `
       <div class="actions claim-actions">
-        <span class="claim-label">${SEAT_NAME[claim.discarder]} の ${renderTileById(claim.tile.id, { variant: "discard", extraClass: "claimed" })} に:</span>
+        <span class="claim-label">${seatName(state.players[claim.discarder])} の ${renderTileById(claim.tile.id, { variant: "discard", extraClass: "claimed" })} に:</span>
         ${claim.offers.ron ? '<button data-action="claim-ron" class="ron">ロン</button>' : ""}
         ${claim.offers.kan ? '<button data-action="claim-kan">カン</button>' : ""}
         ${claim.offers.pon ? '<button data-action="claim-pon">ポン</button>' : ""}
@@ -233,12 +235,12 @@ function actionsHtml(state: GameState): string {
     <div class="actions">
       <button data-action="tsumo" ${canTsumo ? "" : "disabled"}>ツモ和了</button>
       ${selfKanButtons}
-      ${state.phase === "win" || state.phase === "draw_game" ? '<button data-action="new-round" class="secondary">次の局へ</button>' : ""}
+      ${state.phase === "win" || state.phase === "draw_game" ? `<button data-action="new-round" class="secondary">${state.roundIndex >= 3 ? "結果発表へ" : "次の局へ"}</button>` : ""}
     </div>
   `;
 }
 
-function winPanel(info: WinInfo): string {
+function winPanel(state: GameState, info: WinInfo): string {
   const yakuItems = info.yakus
     .map((y) => `<li><span>${y.name}</span><span>${y.han}飜</span></li>`)
     .join("");
@@ -255,12 +257,14 @@ function winPanel(info: WinInfo): string {
   const paymentRows = info.payments
     .map(
       (p) =>
-        `<li><span>${SEAT_NAME[p.seat]}</span><span>${p.delta > 0 ? "+" : ""}${p.delta}</span></li>`,
+        `<li><span>${seatName(state.players[p.seat])}</span><span>${p.delta > 0 ? "+" : ""}${p.delta}</span></li>`,
     )
     .join("");
-  const winnerLabel = info.winner === "east" ? "あなた" : SEAT_NAME[info.winner];
+  const winnerLabel = info.winner === "east" ? "あなた" : seatName(state.players[info.winner]);
   const loser =
-    info.loserSeat !== null ? `<p class="loser-label">放銃: ${SEAT_NAME[info.loserSeat]}</p>` : "";
+    info.loserSeat !== null
+      ? `<p class="loser-label">放銃: ${seatName(state.players[info.loserSeat])}</p>`
+      : "";
   return `
     <div class="panel win-banner">
       <h2>${winnerLabel} の${info.isTsumo ? "ツモ" : "ロン"}和了!</h2>
@@ -277,11 +281,40 @@ function winPanel(info: WinInfo): string {
   `;
 }
 
+/** 終局 (東4終了後) の最終順位表 */
+function roundEndPanel(state: GameState): string {
+  const standings = ALL_SEATS
+    .map((seat) => state.players[seat])
+    .sort((a, b) =>
+      b.score !== a.score
+        ? b.score - a.score
+        : ALL_SEATS.indexOf(a.seat) - ALL_SEATS.indexOf(b.seat),
+    );
+  const rows = standings
+    .map(
+      (player, i) => `
+        <li class="${player.isHuman ? "me" : ""}">
+          <span>${i + 1}位 ${seatName(player)}</span>
+          <span>${player.score} 点</span>
+        </li>`,
+    )
+    .join("");
+  return `
+    <div class="panel win-banner">
+      <h2>終局 — 最終結果</h2>
+      <ul class="yaku-list standings">${rows}</ul>
+      <div class="actions">
+        <button data-action="new-match">もう一度遊ぶ</button>
+      </div>
+    </div>
+  `;
+}
+
 function scoreCell(state: GameState, seat: Seat): string {
   const player = state.players[seat];
   return `
     <div class="score-cell">
-      <div class="label">${SEAT_NAME[seat]}${player.isDealer ? " ・親" : ""}</div>
+      <div class="label">${seatName(player)}${player.isDealer ? " ・親" : ""}</div>
       <div>${player.score} 点</div>
     </div>
   `;
@@ -328,7 +361,8 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
     root.querySelector<HTMLButtonElement>(selector)?.addEventListener("click", fn);
   };
   on('button[data-action="tsumo"]', () => handlers.onDeclareTsumo());
-  on('button[data-action="new-round"]', () => handlers.onNewRound());
+  on('button[data-action="new-round"]', () => handlers.onNextRound());
+  on('button[data-action="new-match"]', () => handlers.onNewMatch());
   on('button[data-action="show-yaku-help"]', () => openYakuHelp());
   on('button[data-action="claim-ron"]', () => handlers.onClaimRon());
   on('button[data-action="claim-kan"]', () => handlers.onClaimKan());

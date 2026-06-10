@@ -281,6 +281,14 @@ button[data-action="self-kan"] .tile:hover,
   font-size: 0.9rem;
 }
 
+.standings li.me {
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: 6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
 @media (max-width: 700px) {
   .cpu-grid {
     grid-template-columns: 1fr;

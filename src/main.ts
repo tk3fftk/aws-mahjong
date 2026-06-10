@@ -48,7 +48,8 @@ const handlers: RenderHandlers = {
     game.moveHumanTile(from, to);
   },
   onDeclareTsumo: () => orToast(game.humanDeclareTsumo()),
-  onNewRound: () => game.startNewRound(),
+  onNextRound: () => game.startNextRound(),
+  onNewMatch: () => game.startMatch(),
   onClaimRon: () => orToast(game.humanClaim({ kind: "ron" })),
   onClaimPon: () => orToast(game.humanClaim({ kind: "pon" })),
   onClaimKan: () => orToast(game.humanClaim({ kind: "kan" })),
@@ -57,4 +58,4 @@ const handlers: RenderHandlers = {
   onSelfKan: (optionIndex) => orToast(game.humanSelfKan(optionIndex)),
 };
 
-game.startNewRound();
+game.startMatch();

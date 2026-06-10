@@ -125,3 +125,19 @@
 - **Consequences**:
   - 4人化 (D-009) とのマージで、`game.ts` の `#discard` / `#advanceToNext` / `#drawRinshan` の3箇所に `player.isHuman` 分岐 (人間だけソートしない) が必要になった
   - ドラッグ&ドロップは HTML5 DnD で `render.ts:attachHandlers` に配線。`UiState` は再描画のたびに `render()` へ引数で渡す
+
+---
+
+## D-011: 局送りは「物理席固定・親と風が回る」
+
+- **What**: 東風戦 (東1〜東4) の局送りを実装 (2026-06)。設計の要点:
+  - `Seat` (east/south/west/north) は**物理席**のまま固定。人間は常に "east" で画面下。局 N の親は `SEAT_ORDER[N]` (東2=south、東3=west、東4=north)
+  - **自風が回る**: 親=1z(東家)、以降ツモ順に 2z/3z/4z (`game.ts:windFor`)。東2では人間は北家になる。役判定は固定マップではなく `players[seat].seatWind` を参照
+  - **親の連荘なし** (公式ルール): 和了・流局を問わず `startNextRound()` で常に親交代。東4終了後は `phase="round_end"` (終局・最終順位表示) で点数は動かない。`startMatch()` で 25000点×4・東1に戻る
+  - `wall.ts:DealtHands` は席名フィールドを廃止し **位置ベース (`piles[0]`=親14枚)** に変更。親が回ると "east" という名前が嘘になるため
+  - 親が CPU の局は `#deal` 内で `#loop()` を回し、人間の手番/claim/終局まで自動進行してから1回だけ emit する (「公開メソッド復帰後 `phase="discard"` ⇒ `turn="east"`」の不変条件を維持)
+- **Why**: 物理席を固定すると UI レイアウト (人間=下、上家=左) と人間ガード (`turn !== "east"` 等) が全局で不変になり、回るのは「風と親フラグ」というデータだけで済む。席そのものを回す案は UI とガードの全面書き換えになるため不採用
+- **Consequences**:
+  - UI の家ラベルは `render.ts:seatName(player)` で `player.seatWind` から動的生成 (「あなた (北家)」等)
+  - 仕込み壁テスト (`riggedDeal`) は「東1 (east=親)」前提。局を跨ぐテストは同じ壁が**次局の親**に再配牌されることに注意 (和了形を pile 0 に置くと次局の CPU 親が即ツモする)
+  - 場風は東 (1z) 固定。南入 (半荘) は未実装

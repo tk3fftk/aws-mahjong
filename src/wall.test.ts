@@ -29,21 +29,21 @@ describe("buildWall", () => {
 });
 
 describe("dealInitialHands", () => {
-  it("親(east)=14枚, 子(south/west/north)=各13枚, 山残り=83枚", () => {
+  it("親=14枚, 他3家=各13枚, 山残り=83枚", () => {
     const wall = buildWall(mulberry32(7));
-    const { east, south, west, north, remainingWall } = dealInitialHands(wall);
-    expect(east).toHaveLength(14);
-    expect(south).toHaveLength(13);
-    expect(west).toHaveLength(13);
-    expect(north).toHaveLength(13);
+    const { piles, remainingWall } = dealInitialHands(wall);
+    expect(piles[0]).toHaveLength(14);
+    expect(piles[1]).toHaveLength(13);
+    expect(piles[2]).toHaveLength(13);
+    expect(piles[3]).toHaveLength(13);
     // 136 - 52 (4人各13枚) - 1 (親の初ツモ) = 83
     expect(remainingWall).toHaveLength(83);
   });
 
   it("配牌 + 山 = 136枚で重複なし", () => {
     const wall = buildWall(mulberry32(11));
-    const { east, south, west, north, remainingWall } = dealInitialHands(wall);
-    const all = [...east, ...south, ...west, ...north, ...remainingWall];
+    const { piles, remainingWall } = dealInitialHands(wall);
+    const all = [...piles.flat(), ...remainingWall];
     expect(all).toHaveLength(136);
     expect(new Set(all.map((t) => `${t.id}:${t.copy}`)).size).toBe(136);
   });

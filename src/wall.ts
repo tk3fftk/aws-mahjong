@@ -47,38 +47,30 @@ export function buildWall(rng: RNG): Tile[] {
 }
 
 export interface DealtHands {
-  east: Tile[];
-  south: Tile[];
-  west: Tile[];
-  north: Tile[];
+  /** piles[0]=親14枚 (初ツモ込み)、以降は親の下家順に各13枚。席への割当は呼び出し側 (局の親) が決める */
+  piles: [Tile[], Tile[], Tile[], Tile[]];
   remainingWall: Tile[];
 }
 
 /**
- * 4人配牌を山先頭から実施し、east=14枚 (親・初ツモ込み)、他3家=各13枚を返す。
+ * 4人配牌を山先頭から実施し、親=14枚 (初ツモ込み)、他3家=各13枚を位置ベースで返す。
  * 残り山は親の初ツモ済みの状態 (=83枚)。王牌の分離は splitDeadWall で行う。
  */
 export function dealInitialHands(wall: Tile[]): DealtHands {
   const work = [...wall];
-  const seats: [Tile[], Tile[], Tile[], Tile[]] = [[], [], [], []]; // east, south, west, north
+  const piles: [Tile[], Tile[], Tile[], Tile[]] = [[], [], [], []]; // 親, 下家, 対面, 上家
   // 4-4-4: 各家に TILES_PER_DEAL_ROUND 枚ずつを INITIAL_DEAL_ROUNDS 周配る
   for (let round = 0; round < INITIAL_DEAL_ROUNDS; round++) {
     for (let s = 0; s < NUM_SEATS; s++) {
-      for (let k = 0; k < TILES_PER_DEAL_ROUND; k++) seats[s]!.push(work.shift()!);
+      for (let k = 0; k < TILES_PER_DEAL_ROUND; k++) piles[s]!.push(work.shift()!);
     }
   }
   // 最後の1巡: 各家に1枚ずつ
-  for (let s = 0; s < NUM_SEATS; s++) seats[s]!.push(work.shift()!);
+  for (let s = 0; s < NUM_SEATS; s++) piles[s]!.push(work.shift()!);
   // 親の初ツモ (14枚目)
-  seats[0]!.push(work.shift()!);
+  piles[0]!.push(work.shift()!);
 
-  return {
-    east: seats[0]!,
-    south: seats[1]!,
-    west: seats[2]!,
-    north: seats[3]!,
-    remainingWall: work,
-  };
+  return { piles, remainingWall: work };
 }
 
 // 王牌 (デッドウォール) の枚数。ドラ表示は未実装だが将来の予約として標準の14枚を確保する

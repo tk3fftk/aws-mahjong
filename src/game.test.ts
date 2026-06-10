@@ -70,14 +70,28 @@ function riggedGame(spec: RiggedDeal): GameController {
     wallFactory: () => riggedDeal(spec),
     rng: () => 0,
   });
-  game.startNewRound();
+  game.startMatch();
   return game;
 }
 
+/** 1局を終局 (win/draw_game) まで進める。人間は先頭打牌・claim は見送り */
+function playRoundToEnd(game: GameController): void {
+  for (let safety = 0; safety < 600; safety++) {
+    const phase = game.state.phase;
+    if (phase === "draw_game" || phase === "win") return;
+    if (phase === "claim") {
+      game.humanSkipClaim();
+    } else {
+      game.humanDiscard(0);
+    }
+  }
+  throw new Error("round did not finish");
+}
+
 describe("GameController / 4人対戦の基本", () => {
-  it("startNewRound 後、親(east)=14枚 / 他3家=各13枚 / 山69枚 / 王牌14枚", () => {
+  it("startMatch 後 (東1局)、親(east)=14枚 / 他3家=各13枚 / 山69枚 / 王牌14枚", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
     const s = game.state;
     expect(s.players.east.hand).toHaveLength(14);
     expect(s.players.south.hand).toHaveLength(13);
@@ -94,7 +108,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("初回配牌: east の最初の13枚は整列済み、14枚目はツモ牌 (lastDrawTile)", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
     const hand = game.state.players.east.hand;
     const first13 = hand.slice(0, 13);
     expect(first13).toEqual(sortTiles(first13));
@@ -103,7 +117,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("humanDiscard で CPU 3人が順に手番を消化し、ターンが east に戻る", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
     const handBefore = [...game.state.players.east.hand];
     game.humanDiscard(0);
     const s = game.state;
@@ -124,7 +138,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("山が0になると流局 (phase=draw_game)", () => {
     const game = new GameController({ seed: 1 });
-    game.startNewRound();
+    game.startMatch();
     // 人間は常に先頭を打牌し、claim は見送って1局を完走させる
     for (let safety = 0; safety < 600; safety++) {
       const phase = game.state.phase;
@@ -144,7 +158,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("humanDeclareTsumo: AWS役無しなら無効 (phase は変わらない)", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
     const result = game.humanDeclareTsumo();
     expect(result.success).toBe(false);
     expect(game.state.phase).toBe("discard");
@@ -153,7 +167,7 @@ describe("GameController / 4人対戦の基本", () => {
   it("canTsumo: 和了形のときだけ true になる (UI のボタン活性用)", () => {
     // ランダム配牌 (seed 42) は和了形でない
     const random = new GameController({ seed: 42 });
-    random.startNewRound();
+    random.startMatch();
     expect(random.state.canTsumo).toBe(false);
 
     // 仕込み壁で kiro 確定の和了形 → true
@@ -167,7 +181,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("moveHumanTile: from の牌が to の位置へ移動する (from<to / from>to)", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
 
     // from < to
     const before = [...game.state.players.east.hand];
@@ -188,7 +202,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("moveHumanTile: 範囲外・from===to は手牌を変えない", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
     const before = [...game.state.players.east.hand];
 
     game.moveHumanTile(0, 99); // 範囲外
@@ -203,7 +217,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("moveHumanTile: discard フェーズ以外 (流局後) は無視される", () => {
     const game = new GameController({ seed: 1 });
-    game.startNewRound();
+    game.startMatch();
     let safety = 500;
     while (game.state.phase === "discard" && safety-- > 0) {
       game.humanDiscard(0);
@@ -216,7 +230,7 @@ describe("GameController / 4人対戦の基本", () => {
 
   it("ツモ後、east の手牌は再ソートされず手動順が維持され、ツモ牌が末尾に追加される", () => {
     const game = new GameController({ seed: 42 });
-    game.startNewRound();
+    game.startMatch();
 
     // 手動で並び替える (0 番目を末尾へ) → 整列が崩れた状態を作る
     game.moveHumanTile(0, 13);
@@ -489,5 +503,91 @@ describe("GameController / カン", () => {
     expect(meld.kind).toBe("kakan");
     expect(meld.tiles.map((t) => t.id)).toEqual(["1m", "1m", "1m", "1m"]);
     expect(game.state.lastDrawTile).not.toBeNull(); // リンシャン
+  });
+});
+
+describe("GameController / 局送り (親・家の移り変わり)", () => {
+  // 東1で人間 (親) がロン和了できるリグ。pile 0 (次局の親の手) は和了形ではないので、
+  // 同じ仕込み壁が再配牌されても東2の CPU 親が即ツモすることはない
+  const RON_RIG: RiggedDeal = {
+    east: "555z234m67m234p55s1z", // 末尾 1z が初ツモ。5m/8m 待ち (kiro)
+    south: "8m999m1p1p2p2p3p3p4s4s5z", // 先頭 8m を打牌 → 人間がロン
+  };
+
+  function winRound1(game: GameController): void {
+    game.humanDiscard(13); // 1z → south が 8m 打牌 → claim
+    expect(game.humanClaim({ kind: "ron" }).success).toBe(true);
+    expect(game.state.phase).toBe("win");
+  }
+
+  it("和了後の startNextRound で親が south に移り、家が一巡ずれる", () => {
+    const game = riggedGame(RON_RIG);
+    winRound1(game);
+    const eastScoreAfterWin = game.state.players.east.score;
+    const southScoreAfterWin = game.state.players.south.score;
+
+    game.startNextRound();
+    const s = game.state;
+    expect(s.roundIndex).toBe(1); // 東2局
+    expect(s.players.south.isDealer).toBe(true);
+    expect(s.players.east.isDealer).toBe(false);
+    // 風はツモ順で回る: 親 south=東家、west=南家、north=西家、east=北家
+    expect(s.players.south.seatWind).toBe("1z");
+    expect(s.players.west.seatWind).toBe("2z");
+    expect(s.players.north.seatWind).toBe("3z");
+    expect(s.players.east.seatWind).toBe("4z");
+    // 点数は引き継がれる (連荘なしでも精算結果は保持)
+    expect(s.players.east.score).toBe(eastScoreAfterWin);
+    expect(s.players.south.score).toBe(southScoreAfterWin);
+    expect(totalScore(game)).toBe(TOTAL_SCORE);
+    // 親 (CPU) は自動進行し、人間の番か claim で停止している
+    expect(["discard", "claim"]).toContain(s.phase);
+    if (s.phase === "discard") expect(s.turn).toBe("east");
+    // CPU 親も配牌14枚から1枚打牌している
+    expect(s.players.south.discards.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("流局でも親は交代する (連荘なし)", () => {
+    const game = new GameController({ seed: 1 });
+    game.startMatch();
+    playRoundToEnd(game);
+    game.startNextRound();
+    expect(game.state.roundIndex).toBe(1);
+    expect(game.state.players.south.isDealer).toBe(true);
+    expect(totalScore(game)).toBe(TOTAL_SCORE);
+  });
+
+  it("東4局終了後の startNextRound で終局 (round_end)、点数は動かない", () => {
+    const game = new GameController({ seed: 1 });
+    game.startMatch();
+    for (let round = 0; round < 4; round++) {
+      expect(game.state.roundIndex).toBe(round);
+      expect(game.state.players[ALL_SEATS[round]!].isDealer).toBe(true);
+      playRoundToEnd(game);
+      game.startNextRound();
+    }
+    expect(game.state.phase).toBe("round_end");
+    expect(totalScore(game)).toBe(TOTAL_SCORE);
+  });
+
+  it("終局から startMatch でやり直すと 25000点×4・東1局に戻る", () => {
+    const game = riggedGame(RON_RIG);
+    winRound1(game);
+    game.startMatch();
+    const s = game.state;
+    expect(s.roundIndex).toBe(0);
+    for (const seat of ALL_SEATS) {
+      expect(s.players[seat].score).toBe(25000);
+    }
+    expect(s.players.east.isDealer).toBe(true);
+    expect(s.players.east.seatWind).toBe("1z");
+  });
+
+  it("局の途中の startNextRound は no-op", () => {
+    const game = new GameController({ seed: 42 });
+    game.startMatch();
+    game.startNextRound();
+    expect(game.state.roundIndex).toBe(0);
+    expect(game.state.phase).toBe("discard");
   });
 });

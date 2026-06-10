@@ -57,12 +57,15 @@ export type TsumoAttempt = ActionAttempt;
 
 const SEAT_ORDER: Seat[] = ["east", "south", "west", "north"];
 
-const SEAT_WIND: Record<Seat, SeatWind> = {
-  east: "1z",
-  south: "2z",
-  west: "3z",
-  north: "4z",
-};
+// 東風戦の局数 (東1〜東4)。局 N の親は SEAT_ORDER[N]
+const ROUNDS_PER_MATCH = 4;
+
+// 親からのツモ順オフセット → 自風 (親=東家)
+const WINDS: SeatWind[] = ["1z", "2z", "3z", "4z"];
+
+function windFor(dealer: Seat, seat: Seat): SeatWind {
+  return WINDS[seatDistance(dealer, seat, SEAT_ORDER)]!;
+}
 
 function nextSeat(seat: Seat): Seat {
   return SEAT_ORDER[(SEAT_ORDER.indexOf(seat) + 1) % SEAT_ORDER.length]!;
@@ -85,27 +88,63 @@ export class GameController {
     return this.#state;
   }
 
-  startNewRound(): void {
+  /** 半荘 (東風戦) を最初から始める。持ち点を 25000 にリセットして東1局を配牌 */
+  startMatch(): void {
+    for (const seat of SEAT_ORDER) {
+      this.#state.players[seat].score = INITIAL_SCORE;
+    }
+    this.#deal(0);
+  }
+
+  /**
+   * 次の局へ進む (win / draw_game からのみ有効)。
+   * AWS麻雀は「親の連荘なし」なので、親の和了・流局を問わず常に親が交代する。
+   * 東4局終了後は phase="round_end" (終局) になり、点数は動かない。
+   */
+  startNextRound(): void {
+    if (this.#state.phase !== "win" && this.#state.phase !== "draw_game") return;
+    if (this.#state.roundIndex >= ROUNDS_PER_MATCH - 1) {
+      this.#state.phase = "round_end";
+      this.#emit();
+      return;
+    }
+    this.#deal(this.#state.roundIndex + 1);
+  }
+
+  /**
+   * 局 roundIndex の配牌。親 = SEAT_ORDER[roundIndex] で、piles[0] (14枚) が親に渡り、
+   * 自風はツモ順で 1z→4z と回る。親が CPU の場合は #loop で人間の手番まで自動進行する。
+   */
+  #deal(roundIndex: number): void {
     const dealt = dealInitialHands(this.#wallFactory(this.#rng));
     const { liveWall, deadWall } = splitDeadWall(dealt.remainingWall);
-    const eastInitialDraw = dealt.east[dealt.east.length - 1] ?? null;
-    const eastSortedRest = sortTiles(dealt.east.slice(0, -1));
-    const eastHand = eastInitialDraw ? [...eastSortedRest, eastInitialDraw] : eastSortedRest;
+    const dealer = SEAT_ORDER[roundIndex % SEAT_ORDER.length]!;
+    const dealerIdx = SEAT_ORDER.indexOf(dealer);
+    // ソートで配列はコピーされるが Tile の同一性は保たれるため、先に初ツモ参照を確保する
+    const initialDraw = dealt.piles[0][dealt.piles[0].length - 1] ?? null;
+
     const prev = this.#state.players;
+    const players = {} as Record<Seat, Player>;
+    dealt.piles.forEach((pile, offset) => {
+      const seat = SEAT_ORDER[(dealerIdx + offset) % SEAT_ORDER.length]!;
+      const isDealer = offset === 0;
+      // 親の手は「整列済み13枚 + 初ツモ(末尾)」。人間の並びは以後手動維持 (D-010)
+      const hand =
+        isDealer && initialDraw
+          ? [...sortTiles(pile.slice(0, -1)), initialDraw]
+          : sortTiles(pile);
+      players[seat] = makePlayer(seat, hand, prev[seat].score, WINDS[offset]!, isDealer);
+    });
+
     this.#state = {
       wall: liveWall,
       deadWall,
-      players: {
-        east: makePlayer("east", eastHand, prev.east.score),
-        south: makePlayer("south", sortTiles(dealt.south), prev.south.score),
-        west: makePlayer("west", sortTiles(dealt.west), prev.west.score),
-        north: makePlayer("north", sortTiles(dealt.north), prev.north.score),
-      },
-      turn: "east",
+      players,
+      turn: dealer,
       roundWind: "1z",
-      roundIndex: 0,
+      roundIndex,
       phase: "discard",
-      lastDrawTile: eastInitialDraw,
+      lastDrawTile: initialDraw,
       lastDiscard: null,
       claim: null,
       selfKanOptions: [],
@@ -113,6 +152,7 @@ export class GameController {
       winInfo: null,
     };
     this.#refreshHumanTurnHints();
+    this.#loop();
     this.#emit();
   }
 
@@ -245,7 +285,7 @@ export class GameController {
       ctx: {
         isTsumo: drewThisTurn,
         isMenzen: isMenzenHand(player.melds),
-        seatWind: SEAT_WIND[seat],
+        seatWind: this.#state.players[seat].seatWind,
         roundWind: this.#state.roundWind,
       },
       rng: this.#rng,
@@ -299,7 +339,7 @@ export class GameController {
         discardedIds: p.discardedIds,
         tile,
         isShimocha: nextSeat(discarder) === seat,
-        seatWind: SEAT_WIND[seat],
+        seatWind: this.#state.players[seat].seatWind,
         roundWind: this.#state.roundWind,
       });
       // リンシャン牌が無いカンは宣言不可 (セルフカン側のガードと揃える)
@@ -466,7 +506,7 @@ export class GameController {
     const judged = judgeYaku(winForm, effectiveHandTiles(player.hand, player.melds), {
       isTsumo: true,
       isMenzen: isMenzenHand(player.melds),
-      seatWind: SEAT_WIND[player.seat],
+      seatWind: player.seatWind,
       roundWind: this.#state.roundWind,
     });
     return canDeclareWin(judged.yakus, judged.isYakuman);
@@ -502,7 +542,7 @@ export class GameController {
     const judged = judgeYaku(winForm, effectiveHandTiles(concealed, player.melds), {
       isTsumo: opts.isTsumo,
       isMenzen: isMenzenHand(player.melds),
-      seatWind: SEAT_WIND[seat],
+      seatWind: this.#state.players[seat].seatWind,
       roundWind: this.#state.roundWind,
     });
     if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
@@ -601,16 +641,22 @@ function removeTiles(hand: Tile[], toRemove: readonly Tile[]): Tile[] {
   return out;
 }
 
-function makePlayer(seat: Seat, hand: Tile[], score: number): Player {
+function makePlayer(
+  seat: Seat,
+  hand: Tile[],
+  score: number,
+  seatWind: SeatWind,
+  isDealer: boolean,
+): Player {
   return {
     seat,
-    seatWind: SEAT_WIND[seat],
+    seatWind,
     hand,
     melds: [],
     discards: [],
     discardedIds: [],
     isHuman: seat === "east",
-    isDealer: seat === "east",
+    isDealer,
     score,
   };
 }
@@ -620,10 +666,10 @@ function createInitialState(): GameState {
     wall: [],
     deadWall: [],
     players: {
-      east: makePlayer("east", [], INITIAL_SCORE),
-      south: makePlayer("south", [], INITIAL_SCORE),
-      west: makePlayer("west", [], INITIAL_SCORE),
-      north: makePlayer("north", [], INITIAL_SCORE),
+      east: makePlayer("east", [], INITIAL_SCORE, windFor("east", "east"), true),
+      south: makePlayer("south", [], INITIAL_SCORE, windFor("east", "south"), false),
+      west: makePlayer("west", [], INITIAL_SCORE, windFor("east", "west"), false),
+      north: makePlayer("north", [], INITIAL_SCORE, windFor("east", "north"), false),
     },
     turn: "east",
     roundWind: "1z",
@@ -638,4 +684,3 @@ function createInitialState(): GameState {
   };
 }
 
-export const _SEAT_ORDER = SEAT_ORDER;
