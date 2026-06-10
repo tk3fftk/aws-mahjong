@@ -10,6 +10,8 @@
   --tile-h: clamp(62px, 9.3vw, 80px);
   --tile-discard-w: clamp(32px, 4.5vw, 40px);
   --tile-discard-h: clamp(46px, 6.4vw, 56px);
+  --tile-back-w: clamp(14px, 2vw, 20px);
+  --tile-back-h: clamp(20px, 2.8vw, 28px);
   --tile-gap: 6px;
 }
 
@@ -156,6 +158,133 @@ h1 {
 
 .tile.win-tile {
   outline: 2px solid var(--accent);
+}
+
+/* ---- 4人対戦レイアウト ---- */
+
+.cpu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cpu-grid .panel {
+  margin-bottom: 0;
+}
+
+.tile.back.compact {
+  width: var(--tile-back-w);
+  height: var(--tile-back-h);
+  border-radius: 3px;
+}
+
+.seat-panel.active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.river {
+  display: grid;
+  grid-template-columns: repeat(6, var(--tile-discard-w));
+  gap: 4px;
+  min-height: var(--tile-discard-h);
+}
+
+.tile.last-discard {
+  outline: 2px solid var(--accent);
+}
+
+/* ---- 副露 (鳴き面子) ---- */
+
+.melds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 0;
+}
+
+.meld {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+}
+
+.meld-label {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  margin-right: 2px;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.meld .tile:hover {
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  z-index: auto;
+}
+
+.tile.claimed {
+  outline: 2px solid var(--accent);
+}
+
+/* ---- 鳴き (クレーム) ボタン ---- */
+
+.claim-actions {
+  align-items: center;
+}
+
+.claim-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.claim-actions .ron {
+  background: var(--danger);
+  color: #fff;
+}
+
+.chi-option,
+button[data-action="self-kan"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+}
+
+.chi-option .tile:hover,
+button[data-action="self-kan"] .tile:hover,
+.claim-label .tile:hover {
+  transform: none;
+  z-index: auto;
+}
+
+.chi-label {
+  margin-right: 2px;
+}
+
+/* ---- スコアパネル ---- */
+
+.scores {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  text-align: center;
+}
+
+.win-banner .loser-label {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 700px) {
+  .cpu-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .label {

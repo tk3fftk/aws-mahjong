@@ -1,9 +1,13 @@
 import "./ui/styles.css";
-import { GameController } from "./game";
+import { GameController, type ActionAttempt } from "./game";
 import { render, showToast, type RenderHandlers, type UiState } from "./ui/render";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("#app not found");
+
+// ?seed=42 で再現可能な局を立てられる (手動テスト用)
+const seedParam = Number(new URLSearchParams(location.search).get("seed"));
+const seed = Number.isFinite(seedParam) && seedParam !== 0 ? seedParam : Date.now();
 
 // 手牌の選択状態などゲーム状態に属さない一時的なUI状態。
 const ui: UiState = { selectedHandIndex: null };
@@ -13,13 +17,19 @@ function rerender(): void {
 }
 
 const game = new GameController({
-  seed: Date.now(),
+  seed,
   // 状態が変わったら選択は無効化して再描画 (捨て/並び替え/手番交代など)
   onChange: () => {
     ui.selectedHandIndex = null;
     rerender();
   },
 });
+
+function orToast(result: ActionAttempt): void {
+  if (!result.success) {
+    showToast(root!, result.reason ?? "実行できません");
+  }
+}
 
 const handlers: RenderHandlers = {
   onTileClick: (index: number) => {
@@ -36,15 +46,14 @@ const handlers: RenderHandlers = {
   onReorder: (from: number, to: number) => {
     game.moveHumanTile(from, to);
   },
-  onDeclareTsumo: () => {
-    const result = game.humanDeclareTsumo();
-    if (!result.success) {
-      showToast(root, result.reason ?? "和了できません");
-    }
-  },
-  onNewRound: () => {
-    game.startNewRound();
-  },
+  onDeclareTsumo: () => orToast(game.humanDeclareTsumo()),
+  onNewRound: () => game.startNewRound(),
+  onClaimRon: () => orToast(game.humanClaim({ kind: "ron" })),
+  onClaimPon: () => orToast(game.humanClaim({ kind: "pon" })),
+  onClaimKan: () => orToast(game.humanClaim({ kind: "kan" })),
+  onClaimChi: (optionIndex) => orToast(game.humanClaim({ kind: "chi", chiIndex: optionIndex })),
+  onClaimPass: () => game.humanSkipClaim(),
+  onSelfKan: (optionIndex) => orToast(game.humanSelfKan(optionIndex)),
 };
 
 game.startNewRound();
