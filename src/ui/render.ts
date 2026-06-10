@@ -20,6 +20,8 @@ export interface UiState {
 const SEAT_NAME: Record<Seat, string> = {
   east: "あなた (東家)",
   south: "CPU (南家)",
+  west: "CPU (西家)",
+  north: "CPU (北家)",
 };
 
 const ROUND_WIND_NAME: Record<string, string> = {
