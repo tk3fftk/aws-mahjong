@@ -216,7 +216,8 @@ function actionsHtml(state: GameState): string {
     `;
   }
   const isMyTurn = state.turn === "east" && state.phase === "discard";
-  const canTsumo = isMyTurn && state.lastDrawTile !== null;
+  // 和了形 + AWS役必須を満たすときだけ押せる (GameController が計算済み)
+  const canTsumo = isMyTurn && state.canTsumo;
   const selfKanButtons = isMyTurn
     ? state.selfKanOptions
         .map(

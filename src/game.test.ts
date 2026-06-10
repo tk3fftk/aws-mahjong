@@ -150,6 +150,21 @@ describe("GameController / 4人対戦の基本", () => {
     expect(game.state.phase).toBe("discard");
   });
 
+  it("canTsumo: 和了形のときだけ true になる (UI のボタン活性用)", () => {
+    // ランダム配牌 (seed 42) は和了形でない
+    const random = new GameController({ seed: 42 });
+    random.startNewRound();
+    expect(random.state.canTsumo).toBe(false);
+
+    // 仕込み壁で kiro 確定の和了形 → true
+    const winning = riggedGame({ east: "555z234m567m234p55s" });
+    expect(winning.state.canTsumo).toBe(true);
+
+    // 和了形でも AWS役が無ければ false (1z 刻子のみ)
+    const noAws = riggedGame({ east: "111z234m567m234p55s" });
+    expect(noAws.state.canTsumo).toBe(false);
+  });
+
   it("moveHumanTile: from の牌が to の位置へ移動する (from<to / from>to)", () => {
     const game = new GameController({ seed: 42 });
     game.startNewRound();
@@ -344,7 +359,8 @@ describe("GameController / ポン・チー", () => {
     expect(s.players.south.discardedIds).toEqual(["1m"]);
     // 手牌は 13 - 2 = 11枚 (打牌待ちの「1枚多い」状態)
     expect(s.players.east.hand).toHaveLength(11);
-    // ポン直後はツモ和了できない
+    // ポン直後はツモ和了できない (ボタンも非活性)
+    expect(s.canTsumo).toBe(false);
     expect(game.humanDeclareTsumo().success).toBe(false);
   });
 

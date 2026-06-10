@@ -109,9 +109,10 @@ export class GameController {
       lastDiscard: null,
       claim: null,
       selfKanOptions: [],
+      canTsumo: false,
       winInfo: null,
     };
-    this.#state.selfKanOptions = this.#computeSelfKanOptions(this.#state.players.east);
+    this.#refreshHumanTurnHints();
     this.#emit();
   }
 
@@ -277,7 +278,7 @@ export class GameController {
     player.discardedIds.push(tile.id);
     this.#state.lastDrawTile = null;
     this.#state.lastDiscard = { seat, tile };
-    this.#state.selfKanOptions = [];
+    this.#refreshHumanTurnHints();
     this.#afterDiscard(seat, tile);
   }
 
@@ -374,7 +375,7 @@ export class GameController {
     // ポン/チー後はツモ無しで打牌待ち (lastDrawTile=null がツモ和了不可のゲート)
     this.#state.lastDrawTile = null;
     this.#state.phase = "discard";
-    this.#state.selfKanOptions = [];
+    this.#refreshHumanTurnHints();
   }
 
   /** 次の席へ手番を移し、山からツモる。山が尽きていれば流局 */
@@ -395,9 +396,7 @@ export class GameController {
       : [...sortTiles(player.hand), drawn.tile!];
     this.#state.lastDrawTile = drawn.tile;
     this.#state.phase = "discard";
-    this.#state.selfKanOptions = player.isHuman
-      ? this.#computeSelfKanOptions(player)
-      : [];
+    this.#refreshHumanTurnHints();
   }
 
   // ---- 内部: カン ----
@@ -443,9 +442,34 @@ export class GameController {
       : [...sortTiles(player.hand), drawn.tile!];
     this.#state.lastDrawTile = drawn.tile; // リンシャンツモ和了可能
     this.#state.phase = "discard";
-    this.#state.selfKanOptions = player.isHuman
-      ? this.#computeSelfKanOptions(player)
+    this.#refreshHumanTurnHints();
+  }
+
+  /**
+   * 人間の手番情報 (暗槓/加槓候補・ツモ和了可否) を更新する。
+   * 人間のツモ番でなければ両方クリアする。状態遷移のたびに呼ぶ。
+   */
+  #refreshHumanTurnHints(): void {
+    const east = this.#state.players.east;
+    const isHumanDrawTurn =
+      this.#state.turn === "east" && this.#state.lastDrawTile !== null;
+    this.#state.selfKanOptions = isHumanDrawTurn
+      ? this.#computeSelfKanOptions(east)
       : [];
+    this.#state.canTsumo = isHumanDrawTurn && this.#canTsumoNow(east);
+  }
+
+  /** ツモ和了が宣言可能か (UI のボタン活性用)。判定規約は #tryWin と同一 */
+  #canTsumoNow(player: Player): boolean {
+    const winForm = canWin(player.hand, player.melds);
+    if (!winForm) return false;
+    const judged = judgeYaku(winForm, effectiveHandTiles(player.hand, player.melds), {
+      isTsumo: true,
+      isMenzen: isMenzenHand(player.melds),
+      seatWind: SEAT_WIND[player.seat],
+      roundWind: this.#state.roundWind,
+    });
+    return canDeclareWin(judged.yakus, judged.isYakuman);
   }
 
   /** ツモ済みの手番中に宣言できる暗槓/加槓の候補 */
@@ -609,6 +633,7 @@ function createInitialState(): GameState {
     lastDiscard: null,
     claim: null,
     selfKanOptions: [],
+    canTsumo: false,
     winInfo: null,
   };
 }

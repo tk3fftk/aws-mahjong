@@ -83,6 +83,7 @@ export interface GameState {
   lastDiscard: { seat: Seat; tile: Tile } | null; // 直前打牌のハイライト用
   claim: ClaimState | null; // phase==="claim" のときのみ非 null
   selfKanOptions: SelfKanOption[]; // 人間の手番中の暗槓/加槓候補
+  canTsumo: boolean; // 人間がツモ和了宣言できるか (UI のボタン活性用)
   winInfo: WinInfo | null;
 }
 
