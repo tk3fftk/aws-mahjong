@@ -110,6 +110,23 @@ h1 {
   cursor: pointer;
 }
 
+.tile.hand.draggable {
+  cursor: grab;
+}
+
+.tile.hand.draggable.dragging {
+  cursor: grabbing;
+  opacity: 0.5;
+}
+
+/* 2クリック捨て牌: 1回目クリックで選択された牌のハイライト (ツモ牌の黄背景とは別) */
+.tile.selected {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+  transform: translateY(-6px);
+  z-index: 4;
+}
+
 .tile:hover {
   transform: scale(1.25);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
@@ -126,9 +143,15 @@ h1 {
   z-index: auto;
 }
 
+/* ツモ牌の背景ハイライト (並び替えても identity で追従) */
+.tile.draw-highlight {
+  background: #fef3c7;
+}
+
+/* ツモ牌が物理的に末尾にあるときだけ左マージンで分離表示する。
+   並び替えで中央に移動した場合は付けない (変な隙間を防ぐ) */
 .tile.draw-separated {
   margin-left: 12px;
-  background: #fef3c7;
 }
 
 .tile.win-tile {

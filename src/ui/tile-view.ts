@@ -8,6 +8,7 @@ export interface RenderTileOpts {
   extraClass?: string;
   index?: number;
   highlight?: boolean;
+  selected?: boolean;
 }
 
 export function renderTile(tile: Tile, opts: RenderTileOpts = {}): string {
@@ -25,10 +26,13 @@ function tileImg(id: TileId, opts: RenderTileOpts): string {
   const classes = ["tile"];
   if (opts.variant) classes.push(opts.variant);
   if (opts.clickable) classes.push("clickable");
-  if (opts.highlight) classes.push("draw-separated");
+  if (opts.draggable) classes.push("draggable");
+  if (opts.selected) classes.push("selected");
+  if (opts.highlight) classes.push("draw-highlight");
   if (opts.extraClass) classes.push(opts.extraClass);
   const dataIndex = opts.index !== undefined ? `data-index="${opts.index}"` : "";
-  return `<span class="${classes.join(" ")}" ${dataIndex} title="${AWS_NAMES[id]}">
+  const draggableAttr = opts.draggable ? `draggable="true"` : "";
+  return `<span class="${classes.join(" ")}" ${dataIndex} ${draggableAttr} title="${AWS_NAMES[id]}">
     <img src="${tileImageUrl(id)}" alt="${AWS_NAMES[id]}">
   </span>`;
 }
