@@ -64,3 +64,29 @@ describe("decomposeStandard", () => {
     expect(decomposeStandard(mpszToTiles("123456789m1234p"))).toEqual([]);
   });
 });
+
+describe("decomposeStandard / meldCount 指定 (副露がある手の純手牌分解)", () => {
+  it("meldCount=3: 11枚を3面子+雀頭に分解できる", () => {
+    const result = decomposeStandard(mpszToTiles("123m456p777s88s"), 3);
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0]!.melds).toHaveLength(3);
+    expect(result[0]!.pair.tiles).toEqual(["8s", "8s"]);
+  });
+
+  it("meldCount=1: 5枚を1面子+雀頭に分解できる", () => {
+    const result = decomposeStandard(mpszToTiles("123m55z"), 1);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.melds[0]!.kind).toBe("chi");
+  });
+
+  it("meldCount=0: 雀頭のみ2枚の分解 (4副露の単騎待ち)", () => {
+    const result = decomposeStandard(mpszToTiles("55z"), 0);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.melds).toEqual([]);
+    expect(result[0]!.pair.tiles).toEqual(["5z", "5z"]);
+  });
+
+  it("meldCount=3 に14枚を渡すと枚数不一致で空配列", () => {
+    expect(decomposeStandard(mpszToTiles("123456789m123p11s"), 3)).toEqual([]);
+  });
+});

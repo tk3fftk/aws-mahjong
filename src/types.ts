@@ -57,6 +57,23 @@ export interface Meld {
   tiles: TileId[];
 }
 
+// 卓上に晒した副露。分解結果の Meld (chi|pon|pair) とは語彙が違うため別型にする。
+export type CalledMeldKind = "chi" | "pon" | "minkan" | "ankan" | "kakan";
+export interface CalledMeld {
+  kind: CalledMeldKind;
+  tiles: Tile[]; // chi/pon=3枚, kan系=4枚 (鳴いた牌を含む)
+  calledFrom: Seat | null; // 打牌者。ankan は null (kakan は元ポンの相手)
+  calledTile: Tile | null; // 鳴いた牌 (UI ハイライト用)。ankan は null
+}
+
+// winning/ 層は副露の出所に依存しないよう構造的部分型で受ける
+export type MeldLike = Pick<CalledMeld, "kind" | "tiles">;
+
+// チーで手牌から出す2枚の候補 (例: 5m 鳴きに 3m4m / 4m6m / 6m7m)
+export interface ChiVariant {
+  tiles: [Tile, Tile];
+}
+
 export interface Decomposition {
   melds: Meld[];
   pair: Meld;

@@ -10,19 +10,23 @@ import {
 // 標準形 (4面子1雀頭) の和了牌枚数
 export const HAND_SIZE_WIN = 14;
 // 標準形の面子数
-const MELDS_PER_HAND = 4;
+export const MELDS_PER_HAND = 4;
 // 刻子は同種3枚
 const PON_SIZE = 3;
 // 雀頭は同種2枚
 const PAIR_SIZE = 2;
 
 /**
- * 14枚の牌(ソート不問)を4面子1雀頭の標準形に分解する。
+ * meldCount*3+2 枚の牌(ソート不問)を「meldCount 面子 + 1雀頭」の標準形に分解する。
+ * 既定は門前14枚 (4面子1雀頭)。副露がある場合は残り面子数を指定する。
  * 成功した分解パターンをすべて返す(平和判定で全順子かを見るために複数解必要)。
- * 分解不能なら空配列。
+ * 分解不能・枚数不一致なら空配列。
  */
-export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
-  if (tileIds.length !== HAND_SIZE_WIN) return [];
+export function decomposeStandard(
+  tileIds: TileId[],
+  meldCount: number = MELDS_PER_HAND,
+): Decomposition[] {
+  if (tileIds.length !== meldCount * PON_SIZE + PAIR_SIZE) return [];
   const counts = counts34(tileIds);
   const found: Decomposition[] = [];
 
@@ -34,7 +38,7 @@ export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
       tiles: [indexToTileId(pairIdx), indexToTileId(pairIdx)],
     };
     const melds: Meld[] = [];
-    if (tryDecomposeMelds(counts, 0, melds)) {
+    if (tryDecomposeMelds(counts, 0, melds, meldCount)) {
       found.push({ melds: melds.map(cloneMeld), pair });
     }
     counts[pairIdx]! += PAIR_SIZE;
@@ -43,18 +47,23 @@ export function decomposeStandard(tileIds: TileId[]): Decomposition[] {
   return dedupe(found);
 }
 
-function tryDecomposeMelds(counts: Int8Array, start: number, melds: Meld[]): boolean {
+function tryDecomposeMelds(
+  counts: Int8Array,
+  start: number,
+  melds: Meld[],
+  meldCount: number,
+): boolean {
   let i = start;
   while (i < TILE_KIND_COUNT && counts[i]! === 0) i++;
-  if (i >= TILE_KIND_COUNT) return melds.length === MELDS_PER_HAND;
-  if (melds.length === MELDS_PER_HAND) return false;
+  if (i >= TILE_KIND_COUNT) return melds.length === meldCount;
+  if (melds.length === meldCount) return false;
 
   // 刻子
   if (counts[i]! >= PON_SIZE) {
     counts[i]! -= PON_SIZE;
     const id = indexToTileId(i);
     melds.push({ kind: "pon", tiles: [id, id, id] });
-    if (tryDecomposeMelds(counts, i, melds)) return true;
+    if (tryDecomposeMelds(counts, i, melds, meldCount)) return true;
     melds.pop();
     counts[i]! += PON_SIZE;
   }
@@ -68,7 +77,7 @@ function tryDecomposeMelds(counts: Int8Array, start: number, melds: Meld[]): boo
       kind: "chi",
       tiles: [indexToTileId(i), indexToTileId(i + 1), indexToTileId(i + 2)],
     });
-    if (tryDecomposeMelds(counts, i, melds)) return true;
+    if (tryDecomposeMelds(counts, i, melds, meldCount)) return true;
     melds.pop();
     counts[i]!++;
     counts[i + 1]!++;
