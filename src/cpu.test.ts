@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { decideCpuAction } from "./cpu";
+import { decideCpuAction, decideClaim } from "./cpu";
 import { mpszToTiles } from "./tiles";
-import type { Tile } from "./types";
+import type { ChiVariant, ClaimOffers, Tile } from "./types";
 
 function toHand(mpsz: string): Tile[] {
   return mpszToTiles(mpsz).map((id) => ({ id, copy: 0 as const }));
+}
+
+function offers(partial: Partial<ClaimOffers> = {}): ClaimOffers {
+  return { ron: false, kan: false, pon: false, chi: [], ...partial };
 }
 
 describe("decideCpuAction", () => {
@@ -49,5 +53,38 @@ describe("decideCpuAction", () => {
     });
     if (action.action !== "discard") throw new Error("expected discard");
     expect(action.tileIndex).toBe(hand.length - 1);
+  });
+
+  it("鳴き直後 (isTsumo=false) は和了形でもツモ宣言しない", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const action = decideCpuAction({
+      hand,
+      ctx: { isTsumo: false, isMenzen: false, seatWind: "2z", roundWind: "1z" },
+      rng: () => 0,
+    });
+    expect(action.action).toBe("discard");
+  });
+});
+
+describe("decideClaim", () => {
+  const tile = (id: Tile["id"]): Tile => ({ id, copy: 0 });
+
+  it("ロン可能なら必ずロン", () => {
+    expect(decideClaim({ offers: offers({ ron: true, pon: true }), tile: tile("5m") })).toBe("ron");
+  });
+
+  it("AWS役牌 (5z/6z/7z) はポンする", () => {
+    expect(decideClaim({ offers: offers({ pon: true }), tile: tile("5z") })).toBe("pon");
+    expect(decideClaim({ offers: offers({ pon: true }), tile: tile("7z") })).toBe("pon");
+  });
+
+  it("数牌や風牌はポンを見送る", () => {
+    expect(decideClaim({ offers: offers({ pon: true }), tile: tile("5m") })).toBeNull();
+    expect(decideClaim({ offers: offers({ pon: true }), tile: tile("1z") })).toBeNull();
+  });
+
+  it("チーは常にパス", () => {
+    const chi: ChiVariant[] = [{ tiles: [tile("3m"), tile("4m")] }];
+    expect(decideClaim({ offers: offers({ chi }), tile: tile("5m") })).toBeNull();
   });
 });
