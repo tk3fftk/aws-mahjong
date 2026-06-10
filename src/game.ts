@@ -82,6 +82,18 @@ export class GameController {
     this.#emit();
   }
 
+  // 人間プレイヤーが手牌を手動で並び替える (from の牌を to の位置へ移動)。
+  // AWS役判定は順序非依存なので、これは純粋に視覚的な整理機能。
+  moveHumanTile(from: number, to: number): void {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") return;
+    const hand = this.#state.players.east.hand;
+    if (from < 0 || from >= hand.length || to < 0 || to >= hand.length) return;
+    if (from === to) return;
+    const [moved] = hand.splice(from, 1);
+    hand.splice(to, 0, moved!);
+    this.#emit();
+  }
+
   humanDeclareTsumo(): TsumoAttempt {
     if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
       return { success: false, reason: "ターンが違います" };
@@ -143,7 +155,12 @@ export class GameController {
       return;
     }
     const player = this.#state.players[nextSeat];
-    player.hand = [...sortTiles(player.hand), drawn.tile];
+    // 人間(east)はツモ後に再ソートせず手動の並びを維持し、ツモ牌を末尾に追加する。
+    // (自動整列は初回配牌のみ。startNewRound 参照)
+    player.hand =
+      nextSeat === "east"
+        ? [...player.hand, drawn.tile]
+        : [...sortTiles(player.hand), drawn.tile];
     this.#state.lastDrawTile = drawn.tile;
     this.#state.phase = "discard";
 

@@ -4,9 +4,17 @@ import { renderTile, renderTileById } from "./tile-view";
 import { openYakuHelp } from "./yaku-help";
 
 export interface RenderHandlers {
-  onDiscard: (index: number) => void;
+  // 手牌クリック: 1回目で選択、選択済み牌の再クリックで捨てる (main.ts 側で判定)
+  onTileClick: (index: number) => void;
+  // ドラッグ&ドロップでの手牌並び替え
+  onReorder: (from: number, to: number) => void;
   onDeclareTsumo: () => void;
   onNewRound: () => void;
+}
+
+// 手牌の選択状態など、ゲーム状態には属さない一時的なUI状態。
+export interface UiState {
+  selectedHandIndex: number | null;
 }
 
 const SEAT_NAME: Record<Seat, string> = {
@@ -21,7 +29,12 @@ const ROUND_WIND_NAME: Record<string, string> = {
   "4z": "北",
 };
 
-export function render(root: HTMLElement, state: GameState, handlers: RenderHandlers): void {
+export function render(
+  root: HTMLElement,
+  state: GameState,
+  handlers: RenderHandlers,
+  ui: UiState,
+): void {
   const turnLabel = state.turn === "east" ? "あなたの番" : "CPUの番";
   const phaseLabel =
     state.phase === "win"
@@ -48,7 +61,7 @@ export function render(root: HTMLElement, state: GameState, handlers: RenderHand
     ${state.phase === "win" && state.winInfo ? winPanel(state.winInfo) : ""}
     ${state.phase === "draw_game" ? `<div class="panel"><h2>流局</h2><p>山が尽きました。誰も和了できませんでした。</p></div>` : ""}
 
-    ${humanPanel(state)}
+    ${humanPanel(state, ui)}
 
     <div class="panel">
       <div class="row" style="justify-content: space-between;">
@@ -60,6 +73,8 @@ export function render(root: HTMLElement, state: GameState, handlers: RenderHand
 
   attachHandlers(root, state, handlers);
 }
+
+let dragSrcIndex: number | null = null;
 
 function cpuPanel(state: GameState): string {
   const cpu = state.players.south;
@@ -77,19 +92,24 @@ function cpuPanel(state: GameState): string {
   `;
 }
 
-function humanPanel(state: GameState): string {
+function humanPanel(state: GameState, ui: UiState): string {
   const east = state.players.east;
   const isMyTurn = state.turn === "east" && state.phase === "discard";
-  const lastDraw = state.lastDrawTile;
-  // 最新ツモ牌は手牌末尾。視覚的に分離するため、末尾とそれ以外を分けて描画。
+  // ツモ牌は手動並び替えで位置が変わりうるので、位置ではなく参照等価で判定する。
+  // (game.ts は同一 Tile オブジェクトを hand と lastDrawTile の両方に格納している)
   const handHtml = east.hand
     .map((t, i) => {
-      const isDrawn = lastDraw !== null && i === east.hand.length - 1;
+      const isDrawn = t === state.lastDrawTile;
+      // ツモ牌の左マージン(分離表示)は、実際に末尾にあるときだけ付ける。
+      const isSeparated = isDrawn && i === east.hand.length - 1;
       return renderTile(t, {
         variant: "hand",
         clickable: isMyTurn,
+        draggable: isMyTurn,
         index: i,
         highlight: isDrawn,
+        selected: i === ui.selectedHandIndex,
+        extraClass: isSeparated ? "draw-separated" : undefined,
       });
     })
     .join("");
@@ -131,7 +151,37 @@ function attachHandlers(root: HTMLElement, state: GameState, handlers: RenderHan
   root.querySelectorAll<HTMLElement>(".tile.hand.clickable").forEach((el) => {
     el.addEventListener("click", () => {
       const idx = Number(el.dataset.index);
-      if (!Number.isNaN(idx)) handlers.onDiscard(idx);
+      if (!Number.isNaN(idx)) handlers.onTileClick(idx);
+    });
+  });
+
+  // ドラッグ&ドロップによる手牌並び替え
+  root.querySelectorAll<HTMLElement>(".tile.hand.draggable").forEach((el) => {
+    el.addEventListener("dragstart", (e) => {
+      const idx = Number(el.dataset.index);
+      if (Number.isNaN(idx)) return;
+      dragSrcIndex = idx;
+      e.dataTransfer?.setData("text/plain", String(idx));
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      el.classList.add("dragging");
+    });
+    el.addEventListener("dragend", () => {
+      dragSrcIndex = null;
+      el.classList.remove("dragging");
+    });
+    el.addEventListener("dragover", (e) => {
+      // preventDefault しないと drop が発火しない
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const target = (e.target as HTMLElement).closest<HTMLElement>(".tile[data-index]");
+      if (!target) return;
+      const to = Number(target.dataset.index);
+      const from = dragSrcIndex ?? Number(e.dataTransfer?.getData("text/plain"));
+      if (Number.isNaN(from) || Number.isNaN(to)) return;
+      handlers.onReorder(from, to);
     });
   });
   root.querySelector<HTMLButtonElement>('button[data-action="tsumo"]')?.addEventListener("click", () => {
