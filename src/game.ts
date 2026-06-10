@@ -116,14 +116,19 @@ export class GameController {
       return { success: false, reason: "AWS役がありません" };
     }
     const isDealer = seat === "east";
-    const score = calcScore({
+    const payments = calcScore({
       totalHan: judged.totalHan,
       isDealer,
       isTsumo: true,
     });
+    // 2人麻雀の暫定精算: 親ツモ=子1人分、子ツモ=親分のみ徴収 (4人化で全員精算に置換予定)
+    const amount =
+      payments.kind === "tsumo-dealer" ? payments.fromEachKo
+      : payments.kind === "tsumo-ko" ? payments.fromDealer
+      : payments.fromDiscarder;
     const loser: Seat = seat === "east" ? "south" : "east";
-    this.#state.players[seat].score += score.winnerGain;
-    this.#state.players[loser].score -= score.loserPay;
+    this.#state.players[seat].score += amount;
+    this.#state.players[loser].score -= amount;
     const info: WinInfo = {
       winner: seat,
       isTsumo: true,
@@ -131,7 +136,7 @@ export class GameController {
       yakus: judged.yakus,
       totalHan: judged.totalHan,
       isYakuman: judged.isYakuman,
-      score: score.winnerGain,
+      score: amount,
     };
     this.#state.winInfo = info;
     this.#state.phase = "win";

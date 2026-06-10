@@ -7,10 +7,19 @@ export interface ScoreInput {
   isTsumo: boolean;
 }
 
-export interface ScoreOutput {
-  winnerGain: number;
-  loserPay: number;
-}
+/**
+ * 支払い内訳。total は常に各支払者の合計と一致する。
+ *   tsumo-dealer: 親ツモ。子3人が fromEachKo ずつ支払う
+ *   tsumo-ko:     子ツモ。親が fromDealer、他の子2人が fromEachKo ずつ支払う
+ *   ron:          放銃者1人が fromDiscarder を支払う
+ */
+export type ScorePayments =
+  | { kind: "tsumo-dealer"; fromEachKo: number; total: number }
+  | { kind: "tsumo-ko"; fromDealer: number; fromEachKo: number; total: number }
+  | { kind: "ron"; fromDiscarder: number; total: number };
+
+// 4人麻雀の子の人数 (親ツモの支払者数 / 子ツモの「他の子」は NUM_KO - 1)
+const NUM_KO = 3;
 
 interface Entry {
   han: number;
@@ -45,23 +54,24 @@ function pickEntry(han: number): Entry {
   return chosen;
 }
 
-/**
- * 2人麻雀化:
- *   親ツモ → CPU(子)1人から oya_tsumo × 1 のみ徴収
- *   子ツモ → 親 1人から ko_tsumo[0] のみ徴収 (子分は欠席として無視)
- *   ロン   → 通常通り放銃者1人から徴収
- */
-export function calcScore(input: ScoreInput): ScoreOutput {
+export function calcScore(input: ScoreInput): ScorePayments {
   const entry = pickEntry(input.totalHan);
-  let amount: number;
-  if (input.isDealer && input.isTsumo) {
-    amount = entry.oya_tsumo;
-  } else if (input.isDealer && !input.isTsumo) {
-    amount = entry.oya_ron;
-  } else if (!input.isDealer && input.isTsumo) {
-    amount = entry.ko_tsumo[0];
-  } else {
-    amount = entry.ko_ron;
+  if (input.isTsumo && input.isDealer) {
+    return {
+      kind: "tsumo-dealer",
+      fromEachKo: entry.oya_tsumo,
+      total: entry.oya_tsumo * NUM_KO,
+    };
   }
-  return { winnerGain: amount, loserPay: amount };
+  if (input.isTsumo) {
+    const [fromDealer, fromEachKo] = entry.ko_tsumo;
+    return {
+      kind: "tsumo-ko",
+      fromDealer,
+      fromEachKo,
+      total: fromDealer + fromEachKo * (NUM_KO - 1),
+    };
+  }
+  const fromDiscarder = input.isDealer ? entry.oya_ron : entry.ko_ron;
+  return { kind: "ron", fromDiscarder, total: fromDiscarder };
 }
