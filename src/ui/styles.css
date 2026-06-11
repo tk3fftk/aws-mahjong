@@ -13,8 +13,8 @@
   /* 手牌 (自分) のサイズ。卓上の捨て牌/裏牌は .table 側で --table-size から導出 */
   --tile-w: clamp(40px, 5.5vw, 52px);
   --tile-h: clamp(56px, 7.8vw, 74px);
-  --tile-discard-w: clamp(28px, 4vw, 36px);
-  --tile-discard-h: clamp(40px, 5.6vw, 50px);
+  --tile-discard-w: clamp(32px, 4.6vw, 42px);
+  --tile-discard-h: clamp(45px, 6.4vw, 59px);
   --tile-back-w: clamp(14px, 2vw, 20px);
   --tile-back-h: clamp(20px, 2.8vw, 28px);
   --tile-gap: 5px;
@@ -184,9 +184,15 @@ h1 {
   /* 卓上の全サイズはこの1つから導出する (正方形が常に閉じるように) */
   --table-size: min(calc(100vh - var(--header-h) - var(--hand-area-h) - 40px), 94vw, 780px);
   --table-size: min(calc(100dvh - var(--header-h) - var(--hand-area-h) - 40px), 94vw, 780px);
-  --tile-discard-w: calc(var(--table-size) / 24);
+  /* 捨て牌は2つの制約の min で限界まで大きくする (数px の余裕込み)。
+     河: zone-length = table - 2*(5.6w + 24) ≥ 6w + 15 → w ≤ (table - 63) / 17.2
+     中央: zone-length ≥ 中央スクエア最小幅 ~165px → w ≤ (table - 213) / 11.2 */
+  --tile-discard-w: min(
+    calc((var(--table-size) - 70px) / 17.2),
+    calc((var(--table-size) - 215px) / 11.2)
+  );
   --tile-discard-h: calc(var(--tile-discard-w) * 1.4);
-  --tile-back-w: calc(var(--table-size) / 42);
+  --tile-back-w: calc(var(--table-size) / 48);
   --tile-back-h: calc(var(--tile-back-w) * 1.4);
   /* 深さ = 河3段 + 裏牌/副露1段 + 余白 */
   --zone-depth: calc(var(--tile-discard-h) * 4 + 24px);
@@ -196,8 +202,10 @@ h1 {
   height: var(--table-size);
   margin: 0 auto;
   display: grid;
-  grid-template-columns: var(--zone-depth) 1fr var(--zone-depth);
-  grid-template-rows: var(--zone-depth) 1fr var(--zone-depth);
+  /* minmax(0, 1fr): 中央スクエアの min-content が広くても中央トラックを膨張させない
+     (膨張するとグリッドが卓の右へはみ出してセンタリングが崩れる) */
+  grid-template-columns: var(--zone-depth) minmax(0, 1fr) var(--zone-depth);
+  grid-template-rows: var(--zone-depth) minmax(0, 1fr) var(--zone-depth);
   grid-template-areas:
     ".    top    ."
     "left center right"
@@ -300,6 +308,8 @@ h1 {
   border: 1px solid rgba(255, 153, 0, 0.25);
   border-radius: 10px;
   padding: 4px;
+  /* 卓が小さいときは中身ごと縮めて zone-length に収める */
+  font-size: clamp(9px, calc(var(--table-size) / 46), 13px);
 }
 
 .center-info {
@@ -308,12 +318,12 @@ h1 {
 }
 
 .center-info .round {
-  font-size: 1.05rem;
+  font-size: 1.3em;
   font-weight: 700;
 }
 
 .center-info .wall {
-  font-size: 0.8rem;
+  font-size: 1em;
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -323,11 +333,19 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.75rem;
+  font-size: 0.95em;
   padding: 2px 8px;
   border-radius: 6px;
   background: var(--panel-raised);
   white-space: nowrap;
+}
+
+/* 左右チップは縦積みで幅を抑える (中段 l+c+r の min-content が zone-length を超えないように) */
+.score-chip.chip-left,
+.score-chip.chip-right {
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
 }
 
 .score-chip b {
