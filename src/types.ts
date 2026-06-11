@@ -73,7 +73,11 @@ export interface SelfKanOption {
 
 export interface GameState {
   wall: Tile[]; // ライブ壁 (配牌後 69枚)。0 で流局
-  deadWall: Tile[]; // 王牌14枚 (ドラ未実装の将来予約。参照されない)
+  // 王牌14枚。[0..4]=表ドラ表示牌, [5..9]=裏ドラ表示牌(リーチ用予約・未公開),
+  // [10..13]=リンシャン予約(未使用。リンシャンはライブ壁末尾から: D-009/D-012)。導出は src/dora.ts
+  deadWall: Tile[];
+  // 公開済みドラ表示牌の枚数 (1..5)。配牌時に1、カン成立ごとに+1 (上限5)
+  doraIndicatorCount: number;
   players: Record<Seat, Player>;
   turn: Seat;
   roundWind: SeatWind;

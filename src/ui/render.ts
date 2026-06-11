@@ -1,6 +1,7 @@
 import type { CalledMeld, GameState, Player, Seat, WinInfo } from "../types";
 import { renderTile, renderTileById } from "./tile-view";
 import { openYakuHelp } from "./yaku-help";
+import { doraIndicators, MAX_DORA_INDICATORS } from "../dora";
 
 export interface RenderHandlers {
   // 手牌クリック: 1回目で選択、選択済み牌の再クリックで捨てる (main.ts 側で判定)
@@ -141,11 +142,20 @@ function centerSquare(state: GameState): string {
       </div>
     `;
   }).join("");
+  // ドラ表示牌: 5スロット固定。未公開は裏向き (カンでめくれる演出が分かりやすい)
+  const revealed = doraIndicators(state.deadWall, state.doraIndicatorCount);
+  const doraTiles = [
+    ...revealed.map((t) => renderTileById(t.id, { variant: "discard" })),
+    ...Array.from({ length: Math.max(0, MAX_DORA_INDICATORS - revealed.length) }, () =>
+      renderTile({ id: "1m", copy: 0 }, { variant: "back" }),
+    ),
+  ].join("");
   return `
     <div class="center">
       <div class="center-info">
         <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</div>
         <div class="wall">山 ${state.wall.length}</div>
+        <div class="dora-row" title="ドラ表示牌">${doraTiles}</div>
       </div>
       ${chips}
     </div>

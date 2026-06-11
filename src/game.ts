@@ -26,6 +26,7 @@ import { judgeYaku, canDeclareWin } from "./yaku/judge";
 import { decideCpuAction, decideClaim } from "./cpu";
 import { CLAIM_PRIORITY, computeEligibility, resolveClaims, seatDistance } from "./claims";
 import { calcScore, type ScorePayments } from "./score";
+import { countDoraHan, doraIndicators, MAX_DORA_INDICATORS } from "./dora";
 
 // 各プレイヤーの初期持ち点 (麻雀標準)
 const INITIAL_SCORE = 25000;
@@ -139,6 +140,7 @@ export class GameController {
     this.#state = {
       wall: liveWall,
       deadWall,
+      doraIndicatorCount: 1, // 配牌時に表ドラ表示牌1枚を公開
       players,
       turn: dealer,
       roundWind: "1z",
@@ -409,6 +411,7 @@ export class GameController {
 
     this.#state.turn = claim.seat;
     if (claim.kind === "kan") {
+      this.#revealKanDora();
       this.#drawRinshan(claim.seat);
       return;
     }
@@ -464,7 +467,16 @@ export class GameController {
         calledTile: pon.calledTile,
       };
     }
+    this.#revealKanDora();
     this.#drawRinshan(seat);
+  }
+
+  /** カン成立時に即カンドラを1枚公開する (明槓の「打牌後めくり」は簡略化: D-012) */
+  #revealKanDora(): void {
+    this.#state.doraIndicatorCount = Math.min(
+      this.#state.doraIndicatorCount + 1,
+      MAX_DORA_INDICATORS,
+    );
   }
 
   /** リンシャンツモ: ライブ壁の末尾から補充 (王牌14枚は固定のまま) */
@@ -548,8 +560,24 @@ export class GameController {
     if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
       return { success: false, reason: "AWS役がありません" };
     }
+    // ドラは役ではない: AWS役ゲート通過後に飜だけ加算する。役満には乗せない (D-012)。
+    // effectiveHandTiles はカン4枚目を落とす (D-009 項5) ため、ここでは副露の全牌を使う。
+    let yakus = judged.yakus;
+    let totalHan = judged.totalHan;
+    if (!judged.isYakuman) {
+      const indicators = doraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount);
+      const allTileIds = [...concealed, ...player.melds.flatMap((m) => m.tiles)].map((t) => t.id);
+      const doraHan = countDoraHan(
+        allTileIds,
+        indicators.map((t) => t.id),
+      );
+      if (doraHan > 0) {
+        yakus = [...yakus, { id: "dora", name: "ドラ", han: doraHan }];
+        totalHan += doraHan;
+      }
+    }
     const payments = calcScore({
-      totalHan: judged.totalHan,
+      totalHan,
       isDealer: player.isDealer,
       isTsumo: opts.isTsumo,
     });
@@ -561,8 +589,8 @@ export class GameController {
       loserSeat: discarder,
       hand: [...concealed],
       melds: [...player.melds],
-      yakus: judged.yakus,
-      totalHan: judged.totalHan,
+      yakus,
+      totalHan,
       isYakuman: judged.isYakuman,
       score: payments.total,
       payments: deltas,
@@ -665,6 +693,7 @@ function createInitialState(): GameState {
   return {
     wall: [],
     deadWall: [],
+    doraIndicatorCount: 1, // deadWall 空なので doraIndicators は [] を返す (配牌前の一瞬)
     players: {
       east: makePlayer("east", [], INITIAL_SCORE, windFor("east", "east"), true),
       south: makePlayer("south", [], INITIAL_SCORE, windFor("east", "south"), false),

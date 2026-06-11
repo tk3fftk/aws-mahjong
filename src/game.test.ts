@@ -19,6 +19,9 @@ const DEAL_INDICES: Record<Seat, number[]> = {
   north: [12, 13, 14, 15, 28, 29, 30, 31, 44, 45, 46, 47, 51],
 };
 const WALL_START = 53;
+// 53(配牌+初ツモ) + 69(ライブ壁) = index 122..135 が王牌、121 がリンシャン1枚目
+const DEAD_WALL_START = 122;
+const LIVE_WALL_END = 121;
 
 interface RiggedDeal {
   east: string; // 14枚 (末尾 = 親の初ツモ)
@@ -26,6 +29,8 @@ interface RiggedDeal {
   west?: string;
   north?: string;
   wallHead?: string; // ライブ壁の先頭に並べる牌
+  deadWall?: string; // 王牌の先頭から並べる (先頭 = ドラ表示牌1枚目)。最大14枚
+  wallEnd?: string; // ライブ壁の末尾から並べる (先頭 = 最初のリンシャン牌)
 }
 
 /** 各席の配牌とライブ壁先頭を指定した仕込み壁 (136枚) を作る。残りはプール順で埋める */
@@ -56,6 +61,16 @@ function riggedDeal(spec: RiggedDeal): Tile[] {
   if (spec.wallHead) {
     mpszToTiles(spec.wallHead).forEach((id, i) => {
       wall[WALL_START + i] = take(id);
+    });
+  }
+  if (spec.deadWall) {
+    mpszToTiles(spec.deadWall).forEach((id, i) => {
+      wall[DEAD_WALL_START + i] = take(id);
+    });
+  }
+  if (spec.wallEnd) {
+    mpszToTiles(spec.wallEnd).forEach((id, i) => {
+      wall[LIVE_WALL_END - i] = take(id);
     });
   }
   for (let i = 0; i < wall.length; i++) {
@@ -104,6 +119,12 @@ describe("GameController / 4人対戦の基本", () => {
     expect(s.players.east.isDealer).toBe(true);
     expect(s.players.south.isDealer).toBe(false);
     expect(totalScore(game)).toBe(TOTAL_SCORE);
+  });
+
+  it("配牌時にドラ表示牌が1枚公開されている", () => {
+    const game = new GameController({ seed: 42 });
+    game.startMatch();
+    expect(game.state.doraIndicatorCount).toBe(1);
   });
 
   it("初回配牌: east の最初の13枚は整列済み、14枚目はツモ牌 (lastDrawTile)", () => {
@@ -503,6 +524,91 @@ describe("GameController / カン", () => {
     expect(meld.kind).toBe("kakan");
     expect(meld.tiles.map((t) => t.id)).toEqual(["1m", "1m", "1m", "1m"]);
     expect(game.state.lastDrawTile).not.toBeNull(); // リンシャン
+  });
+
+  it("暗槓: 宣言と同時にカンドラが1枚増える", () => {
+    const game = riggedGame({ east: "9s9s9s9s2m3m4m6p7p8p2s2s5z6z" });
+    expect(game.state.doraIndicatorCount).toBe(1);
+    expect(game.humanSelfKan(0).success).toBe(true);
+    expect(game.state.doraIndicatorCount).toBe(2);
+  });
+
+  it("明槓: claim からのカンでもカンドラが増える", () => {
+    const game = riggedGame({
+      east: "1m1m1m2p3p4p2s3s4s9p9p1z2z9s",
+      south: "1m345m345p678s4z4z4z",
+    });
+    game.humanDiscard(13);
+    game.humanClaim({ kind: "kan" });
+    expect(game.state.doraIndicatorCount).toBe(2);
+  });
+
+  it("加槓でもカンドラが増える", () => {
+    const game = riggedGame({
+      east: "1m1m2p3p4p2s3s4s9p9p1z1z2z9s",
+      south: "1m345m345p678s4z4z4z",
+      wallHead: "9m8p7s6s1m",
+    });
+    game.humanDiscard(13);
+    game.humanClaim({ kind: "pon" });
+    game.humanDiscard(0);
+    expect(game.state.selfKanOptions).toContainEqual({ kind: "kakan", tileId: "1m" });
+    game.humanSelfKan(0);
+    expect(game.state.doraIndicatorCount).toBe(2);
+  });
+});
+
+describe("GameController / ドラ", () => {
+  it("ツモ和了でドラが totalHan に加算され、役リストに「ドラ」行が入る", () => {
+    // 手牌に 5s×2、表示牌 4s → ドラ=5s で 2飜
+    const withDora = riggedGame({ east: "555z234m567m234p55s", deadWall: "4s" });
+    expect(withDora.humanDeclareTsumo().success).toBe(true);
+    const info = withDora.state.winInfo!;
+    expect(info.yakus).toContainEqual({ id: "dora", name: "ドラ", han: 2 });
+    expect(info.totalHan).toBe(info.yakus.reduce((s, y) => s + y.han, 0));
+
+    // 三角測量: 表示牌 1z (ドラ=2z、手に無し) だと dora 行なし・2飜少ない
+    const noDora = riggedGame({ east: "555z234m567m234p55s", deadWall: "1z" });
+    noDora.humanDeclareTsumo();
+    const base = noDora.state.winInfo!;
+    expect(base.yakus.some((y) => y.id === "dora")).toBe(false);
+    expect(info.totalHan).toBe(base.totalHan + 2);
+  });
+
+  it("ドラだけでは和了できない (AWS役必須ゲートに数えない)", () => {
+    // AWS役なし (1z 刻子のみ) + ドラが2枚乗る表示牌
+    const game = riggedGame({ east: "111z234m567m234p55s", deadWall: "4s" });
+    const result = game.humanDeclareTsumo();
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe("AWS役がありません");
+  });
+
+  it("役満にはドラを加算しない", () => {
+    // 国士無双 (1m 雀頭)。表示牌 9m → ドラ=1m×2 だが加算されない
+    const game = riggedGame({
+      east: "1m9m1p9p1s9s1z2z3z4z5z6z7z1m",
+      deadWall: "9m",
+    });
+    expect(game.humanDeclareTsumo().success).toBe(true);
+    const info = game.state.winInfo!;
+    expect(info.isYakuman).toBe(true);
+    expect(info.yakus.some((y) => y.id === "dora")).toBe(false);
+    expect(info.totalHan).toBe(13);
+  });
+
+  it("ドラ牌の暗槓は4枚分カウントされ、カンドラも乗る", () => {
+    // east: 9s×4 を暗槓 → リンシャン 2z で 555z+234m+222z+44p+暗槓9s が完成
+    // 表示牌1枚目 8s → ドラ=9s×4。カンドラ表示 5m → ドラ=6m×0
+    const game = riggedGame({
+      east: "9s9s9s9s555z234m44p2z2z",
+      deadWall: "8s5m",
+      wallEnd: "2z",
+    });
+    expect(game.humanSelfKan(0).success).toBe(true); // 暗槓 → リンシャン 2z
+    expect(game.state.doraIndicatorCount).toBe(2);
+    expect(game.humanDeclareTsumo().success).toBe(true);
+    const doraRow = game.state.winInfo!.yakus.find((y) => y.id === "dora");
+    expect(doraRow?.han).toBe(4); // effectiveHandTiles の3枚射影に引きずられないこと
   });
 });
 

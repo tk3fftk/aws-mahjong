@@ -28,16 +28,14 @@
 ### リーチ
 
 - `Player.isRiichi: boolean` 追加、リーチ宣言時 1000点棒を場に出すUI
-- 一発・裏ドラの実装
+- 一発・裏ドラの実装 (裏ドラ表示スロット `deadWall[5..9]` とアクセサ `uraDoraIndicators` は D-012 で予約済み)
 - 役満特例の対象に「ダブル立直」(2飜役) が含まれていない点に注意
 - 影響: `Player`, `game.ts`, `yaku/standard.ts`, `ui/`
 
-### ドラ表示牌
+### ~~ドラ表示牌~~ ✅ 実装済み (2026-06)
 
-- デッドウォール (王牌14枚) を `wall.ts` で分離
-- 表示牌スロットを `ui/render.ts` に追加
-- ドラ計算: 表示牌の次の牌が1飜分のドラ。複数ドラ対応
-- 影響: `wall.ts`, `yaku/judge.ts`, `ui/`
+- `src/dora.ts` (純関数 `nextTile`/`countDoraHan`/`doraIndicators`)、`GameState.doraIndicatorCount`、カンドラ即公開、和了時のドラ加算 (ゲート後・役満非加算)、UI のドラ行 (5スロット固定・未公開は裏向き) を実装。設計判断は [D-012](./04-design-decisions.md#d-012-ドラ表示牌-カンドラ-王牌レイアウト)
+- 残: 裏ドラ (リーチ実装で公開。スロット `deadWall[5..9]` とアクセサ `uraDoraIndicators` は予約済み)
 
 ### 符30固定 → calcFu
 

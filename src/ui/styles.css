@@ -328,6 +328,18 @@ h1 {
   margin-top: 2px;
 }
 
+/* ドラ表示牌: 5スロット固定。未公開は裏向き。中央スクエアの font-size に追従して縮む */
+.center-info .dora-row {
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.center-info .dora-row .tile {
+  width: calc(var(--tile-discard-w) * 0.62);
+  height: calc(var(--tile-discard-h) * 0.62);
+}
+
 /* 点数チップ: テキストは回転させない (可読性優先) */
 .score-chip {
   display: inline-flex;

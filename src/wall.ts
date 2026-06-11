@@ -73,7 +73,8 @@ export function dealInitialHands(wall: Tile[]): DealtHands {
   return { piles, remainingWall: work };
 }
 
-// 王牌 (デッドウォール) の枚数。ドラ表示は未実装だが将来の予約として標準の14枚を確保する
+// 王牌 (デッドウォール) の枚数。標準の14枚を確保する。
+// レイアウト: [0..4]=表ドラ表示, [5..9]=裏ドラ予約, [10..13]=リンシャン予約 (導出は src/dora.ts)
 export const DEAD_WALL_SIZE = 14;
 
 export interface WallSplit {
