@@ -23,11 +23,24 @@ export interface UiState {
   selectedHandIndex: number | null;
 }
 
-// 上段の CPU 並び。物理席は固定で、左=上家 (人間 east の前の手番) なので
-// 「左のパネルからチーできる」直感に合う
-const CPU_GRID_ORDER: Seat[] = ["north", "west", "south"];
+// 卓の配置: 自分 (east) が下辺固定。ターン順は east→south→west→north なので、
+// 右=下家 (south)、上=対面 (west)、左=上家 (north)。
+// 「左の河からチーできる」直感は旧レイアウトから引き継ぐ。
+const OPPONENT_ZONES: { pos: "top" | "left" | "right"; seat: Seat }[] = [
+  { pos: "top", seat: "west" },
+  { pos: "left", seat: "north" },
+  { pos: "right", seat: "south" },
+];
 
 const ALL_SEATS: Seat[] = ["east", "south", "west", "north"];
+
+// 中央スクエア内の点数チップの配置 (物理席に対応)
+const CHIP_POS: Record<Seat, string> = {
+  east: "bottom",
+  south: "right",
+  west: "top",
+  north: "left",
+};
 
 const ROUND_WIND_NAME: Record<string, string> = {
   "1z": "東",
@@ -49,6 +62,11 @@ const MELD_LABEL: Record<CalledMeld["kind"], string> = {
   kakan: "加カン",
 };
 
+// 手番ハイライト: 打牌待ちのプレイヤーだけ光らせる
+function isActiveSeat(state: GameState, seat: Seat): boolean {
+  return state.turn === seat && state.phase === "discard";
+}
+
 export function render(
   root: HTMLElement,
   state: GameState,
@@ -66,29 +84,22 @@ export function render(
   root.innerHTML = `
     <header class="app-header">
       <h1>AWS Mahjong</h1>
+      <span class="phase-chip">${phaseLabel}</span>
       <button data-action="show-yaku-help" class="help-btn" aria-label="役一覧を表示">?</button>
     </header>
-    <div class="panel">
-      <div class="status">
-        <span>${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</span>
-        <span>${phaseLabel}</span>
-        <span>山残り: ${state.wall.length}</span>
+
+    <div class="table">
+      ${OPPONENT_ZONES.map(({ pos, seat }) => opponentZone(state, seat, pos)).join("")}
+      ${centerSquare(state)}
+      <div class="zone zone-bottom${isActiveSeat(state, "east") ? " active" : ""}" data-seat="east">
+        <div class="zone-inner">
+          ${riverHtml(state, state.players.east)}
+        </div>
       </div>
     </div>
 
-    <div class="cpu-grid">
-      ${CPU_GRID_ORDER.map((seat) => cpuPanel(state, seat)).join("")}
-    </div>
-
-    ${state.phase === "win" && state.winInfo ? winPanel(state, state.winInfo) : ""}
-    ${state.phase === "draw_game" ? `<div class="panel"><h2>流局</h2><p>山が尽きました。誰も和了できませんでした。</p></div>` : ""}
-    ${state.phase === "round_end" ? roundEndPanel(state) : ""}
-
-    ${humanPanel(state, ui)}
-
-    <div class="panel scores">
-      ${ALL_SEATS.map((seat) => scoreCell(state, seat)).join("")}
-    </div>
+    ${handArea(state, ui)}
+    ${modalHtml(state)}
   `;
 
   attachHandlers(root, handlers);
@@ -96,24 +107,52 @@ export function render(
 
 let dragSrcIndex: number | null = null;
 
-function cpuPanel(state: GameState, seat: Seat): string {
+function opponentZone(state: GameState, seat: Seat, pos: "top" | "left" | "right"): string {
   const player = state.players[seat];
-  const active = state.turn === seat && state.phase === "discard" ? " active" : "";
+  const active = isActiveSeat(state, seat) ? " active" : "";
   const backs = player.hand
     .map(() => renderTile({ id: "1m", copy: 0 }, { variant: "back", extraClass: "compact" }))
     .join("");
+  // .zone-inner はローカル座標 (自分が下辺のつもり) で組む。
+  // ローカル上=回転後に中央側 → 河、ローカル下=卓の外縁側 → 裏牌+副露。
   return `
-    <section class="panel seat-panel${active}" data-seat="${seat}">
-      <div class="label">${seatName(player)} ・ ${player.hand.length}枚</div>
-      <div class="row">${backs}</div>
-      ${meldsRow(player)}
-      <div class="label" style="margin-top: 8px;">捨て牌</div>
-      ${riverHtml(state, player)}
-    </section>
+    <div class="zone zone-${pos}${active}" data-seat="${seat}">
+      <div class="zone-inner">
+        ${riverHtml(state, player)}
+        <div class="opp-meta">
+          <div class="hand-backs">${backs}</div>
+          ${meldsRow(player)}
+        </div>
+      </div>
+    </div>
   `;
 }
 
-function humanPanel(state: GameState, ui: UiState): string {
+function centerSquare(state: GameState): string {
+  const chips = ALL_SEATS.map((seat) => {
+    const player = state.players[seat];
+    const active = isActiveSeat(state, seat) ? " active" : "";
+    return `
+      <div class="score-chip chip-${CHIP_POS[seat]}${active}">
+        <span class="chip-name">${player.isHuman ? "あなた" : "CPU"}</span>
+        <b>${ROUND_WIND_NAME[player.seatWind]}</b>
+        <span class="chip-score">${player.score}</span>
+        ${player.isDealer ? '<span class="dealer">親</span>' : ""}
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="center">
+      <div class="center-info">
+        <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</div>
+        <div class="wall">山 ${state.wall.length}</div>
+      </div>
+      ${chips}
+    </div>
+  `;
+}
+
+function handArea(state: GameState, ui: UiState): string {
   const east = state.players.east;
   const isMyTurn = state.turn === "east" && state.phase === "discard";
   // ツモ牌は手動並び替えで位置が変わりうるので、位置ではなく参照等価で判定する。
@@ -135,18 +174,17 @@ function humanPanel(state: GameState, ui: UiState): string {
     })
     .join("");
   return `
-    <section class="panel seat-panel human${isMyTurn ? " active" : ""}" data-seat="east">
-      <div class="label">${seatName(east)} ・ 手牌 ${east.hand.length} 枚</div>
-      <div class="row">${handHtml}</div>
-      ${meldsRow(east)}
-      <div class="label" style="margin-top: 8px;">捨て牌</div>
-      ${riverHtml(state, east)}
+    <div class="hand-area">
       ${actionsHtml(state)}
-    </section>
+      <div class="hand-bar">
+        <div class="hand-row">${handHtml}</div>
+        ${meldsRow(east, "human-melds")}
+      </div>
+    </div>
   `;
 }
 
-function meldsRow(player: Player): string {
+function meldsRow(player: Player, extraClass = ""): string {
   if (player.melds.length === 0) return "";
   const melds = player.melds
     .map((meld) => {
@@ -171,26 +209,27 @@ function meldsRow(player: Player): string {
       `;
     })
     .join("");
-  return `<div class="melds">${melds}</div>`;
+  return `<div class="melds${extraClass ? ` ${extraClass}` : ""}">${melds}</div>`;
 }
 
 function riverHtml(state: GameState, player: Player): string {
-  if (player.discards.length === 0) {
-    return `<div class="river"><span style="opacity:0.5">なし</span></div>`;
-  }
   const last = state.lastDiscard;
-  const tiles = player.discards
-    .map((t, i) => {
-      const isLast =
-        last !== null &&
-        last.seat === player.seat &&
-        i === player.discards.length - 1 &&
-        t.id === last.tile.id &&
-        t.copy === last.tile.copy;
-      return renderTile(t, { variant: "discard", extraClass: isLast ? "last-discard" : "" });
-    })
+  const tiles = player.discards.map((t, i) => {
+    const isLast =
+      last !== null &&
+      last.seat === player.seat &&
+      i === player.discards.length - 1 &&
+      t.id === last.tile.id &&
+      t.copy === last.tile.copy;
+    return renderTile(t, { variant: "discard", extraClass: isLast ? "last-discard" : "" });
+  });
+  // 6枚×2段 + 3段目は無制限に横へ伸びる (河は18枚を超えうる)
+  const rows = [tiles.slice(0, 6), tiles.slice(6, 12), tiles.slice(12)];
+  const rowsHtml = rows
+    .filter((row) => row.length > 0)
+    .map((row, r) => `<div class="river-row${r === 2 ? " row-overflow" : ""}">${row.join("")}</div>`)
     .join("");
-  return `<div class="river">${tiles}</div>`;
+  return `<div class="river">${rowsHtml}</div>`;
 }
 
 function actionsHtml(state: GameState): string {
@@ -235,7 +274,37 @@ function actionsHtml(state: GameState): string {
     <div class="actions">
       <button data-action="tsumo" ${canTsumo ? "" : "disabled"}>ツモ和了</button>
       ${selfKanButtons}
-      ${state.phase === "win" || state.phase === "draw_game" ? `<button data-action="new-round" class="secondary">${state.roundIndex >= 3 ? "結果発表へ" : "次の局へ"}</button>` : ""}
+    </div>
+  `;
+}
+
+// 和了/流局/終局はインラインではなくモーダルで盤面の上に重ねる。
+// state 駆動なので root 内に描画する (attachHandlers がそのまま効く)。
+// 「次の局へ」ボタンは attachHandlers の querySelector (先頭1件) が拾うため、
+// モーダル内の1個だけに置くこと。
+function modalHtml(state: GameState): string {
+  if (state.phase === "win" && state.winInfo) {
+    return modalWrap(winPanel(state, state.winInfo) + nextRoundButton(state));
+  }
+  if (state.phase === "draw_game") {
+    return modalWrap(
+      `<h2>流局</h2><p>山が尽きました。誰も和了できませんでした。</p>` + nextRoundButton(state),
+    );
+  }
+  if (state.phase === "round_end") {
+    return modalWrap(roundEndPanel(state));
+  }
+  return "";
+}
+
+function modalWrap(content: string): string {
+  return `<div class="modal-overlay"><div class="modal">${content}</div></div>`;
+}
+
+function nextRoundButton(state: GameState): string {
+  return `
+    <div class="actions">
+      <button data-action="new-round">${state.roundIndex >= 3 ? "結果発表へ" : "次の局へ"}</button>
     </div>
   `;
 }
@@ -266,18 +335,16 @@ function winPanel(state: GameState, info: WinInfo): string {
       ? `<p class="loser-label">放銃: ${seatName(state.players[info.loserSeat])}</p>`
       : "";
   return `
-    <div class="panel win-banner">
-      <h2>${winnerLabel} の${info.isTsumo ? "ツモ" : "ロン"}和了!</h2>
-      ${loser}
-      <div class="row">${tiles}</div>
-      ${meldTiles ? `<div class="melds">${meldTiles}</div>` : ""}
-      <ul class="yaku-list">${yakuItems}</ul>
-      <div class="row" style="justify-content: space-between;">
-        <span>合計 ${info.totalHan} 飜${info.isYakuman ? " (役満)" : ""}</span>
-        <span>${info.score} 点</span>
-      </div>
-      <ul class="yaku-list payments">${paymentRows}</ul>
+    <h2>${winnerLabel} の${info.isTsumo ? "ツモ" : "ロン"}和了!</h2>
+    ${loser}
+    <div class="row">${tiles}</div>
+    ${meldTiles ? `<div class="melds">${meldTiles}</div>` : ""}
+    <ul class="yaku-list">${yakuItems}</ul>
+    <div class="row" style="justify-content: space-between;">
+      <span>合計 ${info.totalHan} 飜${info.isYakuman ? " (役満)" : ""}</span>
+      <span>${info.score} 点</span>
     </div>
+    <ul class="yaku-list payments">${paymentRows}</ul>
   `;
 }
 
@@ -300,22 +367,10 @@ function roundEndPanel(state: GameState): string {
     )
     .join("");
   return `
-    <div class="panel win-banner">
-      <h2>終局 — 最終結果</h2>
-      <ul class="yaku-list standings">${rows}</ul>
-      <div class="actions">
-        <button data-action="new-match">もう一度遊ぶ</button>
-      </div>
-    </div>
-  `;
-}
-
-function scoreCell(state: GameState, seat: Seat): string {
-  const player = state.players[seat];
-  return `
-    <div class="score-cell">
-      <div class="label">${seatName(player)}${player.isDealer ? " ・親" : ""}</div>
-      <div>${player.score} 点</div>
+    <h2>終局 — 最終結果</h2>
+    <ul class="yaku-list standings">${rows}</ul>
+    <div class="actions">
+      <button data-action="new-match">もう一度遊ぶ</button>
     </div>
   `;
 }
