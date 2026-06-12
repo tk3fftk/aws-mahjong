@@ -310,6 +310,7 @@ h1 {
   padding: 4px;
   /* 卓が小さいときは中身ごと縮めて zone-length に収める */
   font-size: clamp(9px, calc(var(--table-size) / 46), 13px);
+  position: relative; /* .dora-row を絶対配置する基準 (grid を押し広げないため) */
 }
 
 .center-info {
@@ -330,14 +331,18 @@ h1 {
 
 /* ドラ表示牌: 5スロット固定。未公開は裏向き。中央スクエアの font-size に追従して縮む */
 .center-info .dora-row {
+  /* grid フローから外し、中央スクエア(.center) 基準で配置 → 列幅を押し広げず南チップを潰さない */
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%); /* 水平中央。左へずらすなら translateX(calc(-50% - 〇px)) */
+  bottom: calc(1.9em + var(--tile-discard-h) * 0.15); /* あなたチップの少し上。下げる=値を小さく / 上げる=大きく */
   display: flex;
   gap: 2px;
   justify-content: center;
-  margin-top: 4px;
 }
 .center-info .dora-row .tile {
-  width: calc(var(--tile-discard-w) * 0.62);
-  height: calc(var(--tile-discard-h) * 0.62);
+  width: calc(var(--tile-discard-w) * 0.93);
+  height: calc(var(--tile-discard-h) * 0.93);
 }
 
 /* 点数チップ: テキストは回転させない (可読性優先) */
