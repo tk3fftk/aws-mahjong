@@ -715,6 +715,7 @@ export class GameController {
     }
     const payments = calcScore({
       totalHan,
+      fu: 30, // TODO Phase 5 で実符に置換
       isDealer: player.isDealer,
       isTsumo: opts.isTsumo,
     });
