@@ -1,6 +1,9 @@
 import "./ui/styles.css";
 import { GameController, type ActionAttempt } from "./game";
 import { render, showToast, type RenderHandlers, type UiState } from "./ui/render";
+import { parseDebugConfig, type DebugConfig } from "./debug/params";
+import { riggedDeal } from "./debug/rigged";
+import { updateDebugPanel } from "./debug/panel";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("#app not found");
@@ -10,22 +13,43 @@ const rawSeed = new URLSearchParams(location.search).get("seed");
 const parsedSeed = rawSeed !== null && rawSeed !== "" ? Number(rawSeed) : NaN;
 const seed = Number.isFinite(parsedSeed) ? parsedSeed : Date.now();
 
+// ?debug=1 / ?debug=riichi / ?debug=1&east=... で debug mode (docs/plans 参照)。
+// 不正なプリセット名はトーストを出して通常ゲームへフォールバックする
+let debugConfig: DebugConfig | null = null;
+try {
+  debugConfig = parseDebugConfig(location.search);
+} catch (e) {
+  showToast((e as Error).message, 4000);
+}
+
 // 手牌の選択状態などゲーム状態に属さない一時的なUI状態。
 const ui: UiState = { selectedHandIndex: null, riichiArmed: false };
 
 function rerender(): void {
   render(root!, game.state, handlers, ui);
+  if (debugConfig) updateDebugPanel(game.state, debugConfig);
 }
 
-const game = new GameController({
-  seed,
-  // 状態が変わったら選択は無効化して再描画 (捨て/並び替え/手番交代など)
-  onChange: () => {
-    ui.selectedHandIndex = null;
-    ui.riichiArmed = false; // 状態が変わったら armed モードは解除する
-    rerender();
-  },
-});
+function createGame(): GameController {
+  const rig = debugConfig?.rig;
+  return new GameController({
+    seed,
+    // 仕込み壁は局ごとに同じ wallFactory が呼ばれるため、次局以降も同一の配牌になる
+    // (debug 用途では局送り後も同じ局面を再現できるのが都合よい)
+    wallFactory: rig ? () => riggedDeal(rig) : undefined,
+    // 仕込み時は CPU を「常に先頭牌を打牌」に固定して進行を決定的にする (テストの riggedGame と同じ)。
+    // ?seed= を明示した場合はそちらを優先し、CPU の打牌を揺らせる
+    rng: rig && !Number.isFinite(parsedSeed) ? () => 0 : undefined,
+    // 状態が変わったら選択は無効化して再描画 (捨て/並び替え/手番交代など)
+    onChange: () => {
+      ui.selectedHandIndex = null;
+      ui.riichiArmed = false; // 状態が変わったら armed モードは解除する
+      rerender();
+    },
+  });
+}
+
+let game = createGame();
 
 function orToast(result: ActionAttempt): void {
   if (!result.success) {
@@ -72,4 +96,13 @@ const handlers: RenderHandlers = {
   },
 };
 
-game.startMatch();
+try {
+  game.startMatch();
+} catch (e) {
+  // riggedDeal の検証エラー (枚数違い・mpsz 不正・牌の使いすぎ)。
+  // wallFactory は配牌のたびに呼ばれて再発するため、rig を捨てて通常ゲームで開始し直す
+  showToast(`配牌の仕込みに失敗: ${(e as Error).message}`, 5000);
+  debugConfig = debugConfig && { ...debugConfig, rig: null };
+  game = createGame();
+  game.startMatch();
+}

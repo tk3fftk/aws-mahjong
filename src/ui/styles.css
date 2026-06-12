@@ -773,3 +773,95 @@ button.secondary {
     gap: 8px;
   }
 }
+
+/* ---- debug panel (?debug=...) ---- */
+
+#debug-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  max-height: 100vh;
+  overflow-y: auto;
+  background: rgba(10, 14, 22, 0.92);
+  color: #d7e0ee;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  border-bottom-left-radius: 8px;
+  z-index: 25; /* トースト (30) より下、役一覧モーダル (20) より上 */
+}
+
+#debug-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+#debug-panel section,
+#debug-panel form {
+  padding: 4px 10px;
+}
+
+#debug-panel h4 {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  color: #8fa3c0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
+}
+
+#debug-panel .debug-row {
+  margin: 2px 0;
+}
+
+#debug-panel .debug-indent {
+  margin-left: 16px;
+}
+
+#debug-panel .ok {
+  color: #7fd98a;
+}
+
+#debug-panel .ng {
+  color: #ff8a8a;
+  font-weight: 700;
+}
+
+/* 牌画像はパネル用に縮小 (盤面の .discard サイズを上書き) */
+#debug-panel .tile.discard {
+  width: 18px;
+  height: 26px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+#debug-panel .debug-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+}
+
+#debug-panel .debug-field input,
+#debug-panel .debug-field select {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+}
+
+#debug-panel form button {
+  margin: 6px 0 10px;
+  padding: 4px 12px;
+  background: var(--accent-soft, #2c4a6e);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
