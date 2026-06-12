@@ -50,8 +50,9 @@ ui/render ──────────────┐
 | `src/yaku/standard.ts` | 標準麻雀の役判定。**5z/6z/7z 刻子はスキップ** (`aws-pattern.ts` 側で扱うため) |
 | `src/yaku/aws-pattern.ts` | AWS固有役の判定。`detectAwsYakus()` + 4分類ごとのマッチ関数。`hanOpen=null` は門前限定として鳴き手で不成立 |
 | `src/yaku/aws-classification.ts` | 22役 → 4分類 (completed-meld / tile-superset / repeated-superset / seven-pairs) のハードコードマップ |
-| `src/yaku/judge.ts` | 標準役 + AWS役の統合。`hasAnyAwsYaku()` で AWS役必須ルールのゲートを提供 |
-| `src/score.ts` | 飜→点数テーブル。`calcScore` は支払者別内訳 (`ScorePayments`) を返す。`YAKUMAN_HAN_THRESHOLD` をここで export し、judge も import |
+| `src/yaku/judge.ts` | 標準役 + AWS役の統合。(分解×和了牌配置) の (han, fu) 高点法選択。`hasAnyAwsYaku()` で AWS役必須ルールのゲートを提供 |
+| `src/fu.ts` | 符計算。`enumerateWinPlacements` (和了牌を置ける門前面子/雀頭の列挙 = 高点法の候補集合)・`calcFu` (1配置の符)・`SEVEN_PAIRS_FU` (D-014) |
+| `src/score.ts` | (han, fu)→点数。標準式 `fu×2^(2+han)` + 満貫キャップ (D-014)。`calcScore` は支払者別内訳 (`ScorePayments`) を返す。`YAKUMAN_HAN_THRESHOLD` をここで export し、judge も import |
 | `src/cpu.ts` | CPU の意思決定。`decideCpuAction` (ツモ和了宣言 or ランダム打牌) と `decideClaim` (ロン即取り / AWS役牌のみポン / チーはパス) |
 | `src/game.ts` | `GameController`: 状態を持つ唯一のクラス。4人分の配牌・ツモ・打牌・鳴き (claim フェーズ)・カン・和了・流局を反復ループ (`#loop`) で制御 |
 | `src/ui/render.ts` | DOM 全置換型レンダラ。`state` から HTML を生成し、event handler を貼る。4席レイアウト・副露・claim ボタン・D&D並び替えの配線 |

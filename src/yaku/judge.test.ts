@@ -58,6 +58,16 @@ describe("judgeYaku", () => {
     expect(result.yakus.find((y) => y.id === "dragon-white")).toBeUndefined();
   });
 
+  it("七対子のツモは門前清自摸和が複合する (七対子は常に門前)", () => {
+    const hand = toHand("11m22m66m33p44s55z77z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx); // isTsumo: true
+    expect(result.yakus.find((y) => y.id === "menzen-tsumo")?.han).toBe(1);
+    expect(result.totalHan).toBe(3); // 七対子2 + 門前清自摸和1
+    const ron = judgeYaku(winForm, hand, { ...baseCtx, isTsumo: false });
+    expect(ron.yakus.find((y) => y.id === "menzen-tsumo")).toBeUndefined();
+  });
+
   it("七対子(AWS固有役無し) は和了不可", () => {
     // dr-architecture でない普通の七対子は AWS役ゼロ
     const hand = toHand("11m22m66m33p44s55z77z");

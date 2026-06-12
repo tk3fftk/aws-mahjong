@@ -55,6 +55,10 @@ export function judgeYaku(
     const yakus: YakuResult[] = [
       { id: "chiitoitsu", name: "七対子", han: 2 },
     ];
+    // 七対子は構造上常に門前 (canWin が副露ありを弾く) なのでツモなら門前清自摸和が複合する
+    if (ctx.isMenzen && ctx.isTsumo) {
+      yakus.push({ id: "menzen-tsumo", name: "門前清自摸和", han: 1 });
+    }
     // tanyao/honitsu/chinitsu も七対子に複合可
     if (tileIds.every((id) => !isYaochu(id))) {
       yakus.push({ id: "tanyao", name: "断么九", han: 1 });

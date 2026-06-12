@@ -47,7 +47,11 @@ function previewWaitYaku(
   const full: Tile[] = [...concealed, { id, copy: 0 as Copy }];
   const winForm = canWin(full, player.melds);
   if (!winForm) return "";
-  const judge = judgeYaku(winForm, effectiveHandTiles(full, player.melds), ctx);
+  // 待ち牌が確定しているので winningTileId を渡す (平和の待ち形条件・符を実際の和了と一致させる)
+  const judge = judgeYaku(winForm, effectiveHandTiles(full, player.melds), {
+    ...ctx,
+    winningTileId: id,
+  });
   const names = judge.yakus.map((y) => `${y.name}${y.han}`).join(" ");
   const ok = canDeclareWin(judge.yakus, judge.isYakuman);
   const cls = ok ? "ok" : "ng";
@@ -116,7 +120,7 @@ export function debugPanelHtml(state: GameState): string {
     seatWind: me.seatWind,
     roundWind: state.roundWind,
     isRiichi: me.isRiichi,
-    winningTileId: null, // 適格性プレビュー (符は計算しない)
+    winningTileId: null, // ベース値。previewWaitYaku が待ち牌ごとに上書きする
     melds: me.melds,
   };
 
