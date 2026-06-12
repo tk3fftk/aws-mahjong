@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { judgeStandardYakus, type YakuContext } from "./standard";
 import { decomposeStandard } from "../winning/decompose";
 import { mpszToTiles } from "../tiles";
+import type { WaitShape } from "../fu";
 
 function ctx(over: Partial<YakuContext> = {}): YakuContext {
   return {
@@ -13,12 +14,12 @@ function ctx(over: Partial<YakuContext> = {}): YakuContext {
   };
 }
 
-function judgeFirstDecomp(mpsz: string, c: YakuContext) {
+function judgeFirstDecomp(mpsz: string, c: YakuContext, waitShape: WaitShape | null = null) {
   const tiles = mpszToTiles(mpsz);
   const decomps = decomposeStandard(tiles);
   if (decomps.length === 0) throw new Error("not decomposable: " + mpsz);
   // 標準役判定は最初の分解で確認 (実運用では judge.ts が全分解を試す)
-  return judgeStandardYakus(decomps[0]!, c);
+  return judgeStandardYakus(decomps[0]!, c, waitShape);
 }
 
 describe("judgeStandardYakus / 平和(pinfu)", () => {
@@ -40,6 +41,26 @@ describe("judgeStandardYakus / 平和(pinfu)", () => {
   it("刻子を含むと不成立", () => {
     const yakus = judgeFirstDecomp("111m234m789m123p55s", ctx());
     expect(yakus.find((y) => y.id === "pinfu")).toBeUndefined();
+  });
+
+  it("両面待ち (waitShape: ryanmen) なら成立", () => {
+    const yakus = judgeFirstDecomp("123456789m123p55s", ctx(), "ryanmen");
+    expect(yakus.find((y) => y.id === "pinfu")?.han).toBe(1);
+  });
+
+  it("嵌張待ち (waitShape: kanchan) だと不成立", () => {
+    const yakus = judgeFirstDecomp("123456789m123p55s", ctx(), "kanchan");
+    expect(yakus.find((y) => y.id === "pinfu")).toBeUndefined();
+  });
+
+  it("単騎待ち (waitShape: tanki) だと不成立", () => {
+    const yakus = judgeFirstDecomp("123456789m123p55s", ctx(), "tanki");
+    expect(yakus.find((y) => y.id === "pinfu")).toBeUndefined();
+  });
+
+  it("waitShape 省略 (null) は待ち形不問で従来通り成立 (適格性パス互換)", () => {
+    const yakus = judgeFirstDecomp("123456789m123p55s", ctx());
+    expect(yakus.find((y) => y.id === "pinfu")?.han).toBe(1);
   });
 });
 
