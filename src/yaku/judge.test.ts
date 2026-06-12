@@ -18,6 +18,8 @@ const baseCtx = {
   isMenzen: true,
   seatWind: "1z",
   roundWind: "1z",
+  winningTileId: null,
+  melds: [],
 } as const;
 
 describe("judgeYaku", () => {
@@ -100,6 +102,8 @@ describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
       isMenzen: isMenzenHand(melds),
       seatWind: "1z",
       roundWind: "1z",
+      winningTileId: null,
+      melds,
     });
   }
 
@@ -121,6 +125,8 @@ describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
       isMenzen: true,
       seatWind: "1z",
       roundWind: "1z",
+      winningTileId: null,
+      melds: [],
     });
     expect(result.yakus.find((y) => y.id === "pinfu")).toBeTruthy();
     expect(result.yakus.find((y) => y.id === "menzen-tsumo")).toBeUndefined();
@@ -224,5 +230,65 @@ describe("judgeYaku / リーチ・一発 (judge.ts トップレベル付与)", (
       { id: "menzen-tsumo", name: "門前清自摸和", han: 1 },
     ];
     expect(canDeclareWin(yakus, false)).toBe(false);
+  });
+});
+
+describe("judgeYaku / 符 (fu)", () => {
+  it("kiro 単騎ツモ → fu 40 (20 + 5z暗刻8 + 単騎2 + ツモ2 = 32 切り上げ)", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, winningTileId: "5s" });
+    expect(result.fu).toBe(40);
+  });
+
+  it("七対子 → fu 25", () => {
+    const hand = toHand("11m22m66m33p44s55z77z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, winningTileId: "4s" });
+    expect(result.fu).toBe(25);
+  });
+
+  it("国士無双 (役満) → fu null (符不問)", () => {
+    const hand = toHand("1m9m1p9p1s9s1z2z3z4z5z6z7z1z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, winningTileId: "1z" });
+    expect(result.fu).toBeNull();
+  });
+
+  it("適格性パス (winningTileId: null) → fu null (符を計算しない)", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.fu).toBeNull();
+  });
+
+  it("配置の高点法: 123m/345m 両方に置ける 3m ツモは辺張+2 を採用 → fu 40", () => {
+    // 20 + 辺張2 + 666p暗刻4 + 777s暗刻4 + ツモ2 = 32 → 40 (両面解釈は 30)
+    const hand = toHand("123m345m666p777s88s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, winningTileId: "3m" });
+    expect(result.fu).toBe(40);
+  });
+
+  it("暗刻優先の高点法: ロン牌 1m を順子側に置き 111m を暗刻で残す → fu 50", () => {
+    // 20 + 門前ロン10 + 111m暗刻8 + 555p暗刻4 = 42 → 50 (シャンポン=明刻解釈は 40)
+    const hand = toHand("1m1m1m1m2m3m555p678s99s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, {
+      ...baseCtx,
+      isTsumo: false,
+      winningTileId: "1m",
+    });
+    expect(result.fu).toBe(50);
+  });
+
+  it("(han, fu) 順序: 平和つき順子分解が暗刻分解 (fu 40) に飜優先で勝つ → fu 20", () => {
+    // 111222333m456m77m の 4m ツモ。清一色は両分解に付くため差は 平和+両面 の有無:
+    // 順子分解 (123m×3) = ツモ1+平和1+清一6 = 8飜 20符 > 暗刻分解 = 7飜 40符
+    const hand = toHand("111222333m456m77m");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, winningTileId: "4m" });
+    expect(result.yakus.find((y) => y.id === "pinfu")).toBeTruthy();
+    expect(result.fu).toBe(20);
   });
 });
