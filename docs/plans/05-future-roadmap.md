@@ -40,11 +40,11 @@
 - `src/dora.ts` (純関数 `nextTile`/`countDoraHan`/`doraIndicators`)、`GameState.doraIndicatorCount`、カンドラ即公開、和了時のドラ加算 (ゲート後・役満非加算)、UI のドラ行 (5スロット固定・未公開は裏向き) を実装。設計判断は [D-012](./04-design-decisions.md#d-012-ドラ表示牌-カンドラ-王牌レイアウト)
 - 裏ドラはリーチ実装 ([D-013](./04-design-decisions.md#d-013-リーチ-一発--裏ドラ--自動ツモ切り--供託--cpuリーチ)) で公開済み (スロット `deadWall[5..9]` / アクセサ `uraDoraIndicators`)
 
-### 符30固定 → calcFu
+### ~~符30固定 → calcFu~~ ✅ 実装済み (2026-06)
 
-- 現状: 30符固定 (rule.html の点数表が han ベースなので)
-- 追加内容: `score.ts:calcFu()` を実装。雀頭・面子・待ち形から符を計算
-- 影響: `score.ts` (新規関数), 点数テーブルの han→{han, fu} 拡張
+- `calcFu` は `score.ts` ではなく**新規 `src/fu.ts` に分離** (score.ts を依存ゼロの葉モジュールに保つ。D-006)。`enumerateWinPlacements` (待ち形列挙) + `calcFu` + 七対子固定25符
+- 点数は han ベースの `TABLE` を廃止し標準式 `fu × 2^(2+han)` + 満貫キャップへ移行。**公式 rule.html の表から4飜以下で意図的に逸脱** (比較表と理由は [D-014](./04-design-decisions.md#d-014-符計算-calcfu--標準点数式への移行))
+- 高点法は `judge.ts` の (分解×配置) ループで (han, fu) 辞書式最大。平和に両面待ち条件を追加
 
 ---
 
@@ -86,7 +86,7 @@
 | 妥協 | 影響 | 対応案 |
 |---|---|---|
 | `tile-superset` の偽陽性 | 1手で AWS固有役が複数ヒットし、飜が過大になる可能性 | 個別判定関数化 (長期) |
-| 符30固定 | 雀頭・待ち形による符変動が反映されない | `calcFu` 実装 (中期) |
+| 低翻域 (4飜以下) の点数が公式 rule.html 表と乖離 | 標準式 `fu×2^(2+han)` 採用の意図的逸脱 ([D-014](./04-design-decisions.md#d-014-符計算-calcfu--標準点数式への移行)) | 仕様として承認済み (戻すなら fu を表示専用に格下げ) |
 | 役は yaku.json の sampleMpszList 解釈 | 上流の表現意図と完全一致を保証していない | yaku.json をフォークし `pattern` フィールドを正式追加 |
 | CPU の打牌は完全ランダム | ほとんど流局になる | シャンテン数計算で AI 強化 (長期) |
 | 槍槓・同巡フリテン・ダブロン無し | 厳密な競技ルールと差異 | 必要になったら claim 解決に追加 |

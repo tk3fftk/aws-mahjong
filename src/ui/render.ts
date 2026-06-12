@@ -391,7 +391,7 @@ function winPanel(state: GameState, info: WinInfo): string {
     ${uraRow}
     <ul class="yaku-list">${yakuItems}</ul>
     <div class="row" style="justify-content: space-between;">
-      <span>合計 ${info.totalHan} 飜${info.isYakuman ? " (役満)" : ""}</span>
+      <span>合計 ${info.isYakuman ? "" : `${info.fu}符 `}${info.totalHan}飜${info.isYakuman ? " (役満)" : ""}</span>
       <span>${info.score} 点</span>
     </div>
     <ul class="yaku-list payments">${paymentRows}${potRow}</ul>

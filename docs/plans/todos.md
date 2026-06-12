@@ -15,6 +15,8 @@
 
 ## 未消化
 
+- [ ] **`src/yaku/judge.ts` 適格性パスの平和**: `winningTileId: null` (CPU 打牌判断・debug panel) では平和が待ち形不問で付き、和了確定時と飜数が1ずれ得る。ゲート (AWS役有無) には影響しないが、プレビュー表示の飜数が実際と異なるケースがある / 必要なら適格性パスでも待ち牌ごとに waitShape を渡す (during: feature-calc-fu 実装)
+
 - [ ] **`src/yaku/standard.ts:judgeStandardYakus` の役牌セクション** — 「5z/6z/7z をスキップしている (= AWS固有役側に一本化)」のクロスリファレンスコメントが欲しい。実装上の重要な約束だが、関数を読み下すと「忘れた」と勘違いされる恐れあり。 (during: 02-aws-yaku-judgment.md)
 - [ ] **`src/yaku/aws-pattern.ts:detectAwsYakus` の JSDoc** — 既に「isCombineAllowed=false は標準対応役との非複合の意味」と書かれているが、根拠 (yaku.json description の文面) と「AWS役どうしの加算は意図通り」を 1-2行追記してより堅牢にしたい。 (during: 02-aws-yaku-judgment.md)
 - [ ] **`src/wall.ts:mulberry32`** — 「既知の PRNG アルゴリズム名」「ライセンス・出典 (パブリックドメイン)」へのコメントを1行。テストでの seed 固定再現性に依存するので、出典を残しておきたい。 (during: 03-tdd-policy.md)
