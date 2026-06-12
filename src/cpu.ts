@@ -1,4 +1,4 @@
-import type { ClaimKind, ClaimOffers, MeldLike, SeatWind, Tile } from "./types";
+import type { ClaimKind, ClaimOffers, MeldLike, SeatWind, Tile, TileId } from "./types";
 import { isDragon } from "./tiles";
 import { canWin } from "./winning/check";
 import { effectiveHandTiles } from "./winning/melds";
@@ -11,6 +11,7 @@ export interface CpuContext {
   seatWind: SeatWind;
   roundWind: SeatWind;
   isRiichi: boolean; // 既にリーチ済みか (手牌が固定されツモ切りのみになる)
+  winningTileId: TileId | null; // ツモ牌 (打牌判断時は null。judgeYaku は isTsumo 時のみ消費)
 }
 
 export interface CpuInput {
@@ -33,7 +34,11 @@ export function decideCpuAction(input: CpuInput): CpuAction {
   // ツモ直後 (手牌が打牌可能枚数) のみ和了判定。鳴き直後はツモ和了できない
   const win = input.ctx.isTsumo ? canWin(input.hand, melds) : null;
   if (win) {
-    const result = judgeYaku(win, effectiveHandTiles(input.hand, melds), input.ctx);
+    // melds は CpuInput.melds を使い回す (ctx に重複させて乖離するのを防ぐ)
+    const result = judgeYaku(win, effectiveHandTiles(input.hand, melds), {
+      ...input.ctx,
+      melds,
+    });
     if (canDeclareWin(result.yakus, result.isYakuman)) {
       return { action: "win" };
     }

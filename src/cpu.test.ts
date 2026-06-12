@@ -16,7 +16,7 @@ describe("decideCpuAction", () => {
     const hand = toHand("555z234m567m234p55s");
     const action = decideCpuAction({
       hand,
-      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false },
+      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null },
       rng: () => 0,
     });
     expect(action.action).toBe("win");
@@ -27,7 +27,7 @@ describe("decideCpuAction", () => {
     const hand = toHand("111z234m567m234p55s");
     const action = decideCpuAction({
       hand,
-      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false },
+      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null },
       rng: () => 0,
     });
     expect(action.action).toBe("discard");
@@ -37,7 +37,7 @@ describe("decideCpuAction", () => {
     const hand = toHand("123m456p789s11z22z33z4z"); // 14枚 で 標準形でも七対子でもない
     const action = decideCpuAction({
       hand,
-      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false },
+      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null },
       rng: () => 0,
     });
     if (action.action !== "discard") throw new Error("expected discard");
@@ -48,7 +48,7 @@ describe("decideCpuAction", () => {
     const hand = toHand("123m456p789s11z22z33z4z");
     const action = decideCpuAction({
       hand,
-      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false },
+      ctx: { isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null },
       rng: () => 0.999,
     });
     if (action.action !== "discard") throw new Error("expected discard");
@@ -59,7 +59,7 @@ describe("decideCpuAction", () => {
     const hand = toHand("555z234m567m234p55s");
     const action = decideCpuAction({
       hand,
-      ctx: { isTsumo: false, isMenzen: false, seatWind: "2z", roundWind: "1z", isRiichi: false },
+      ctx: { isTsumo: false, isMenzen: false, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null },
       rng: () => 0,
     });
     expect(action.action).toBe("discard");
@@ -68,7 +68,7 @@ describe("decideCpuAction", () => {
 
 describe("decideCpuAction / リーチ", () => {
   const ctx = (over: { isRiichi?: boolean } = {}) =>
-    ({ isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, ...over }) as const;
+    ({ isTsumo: true, isMenzen: true, seatWind: "2z", roundWind: "1z", isRiichi: false, winningTileId: null, ...over }) as const;
 
   it("riichiAllowed かつテンパイなら {action:'riichi'} を返す (最初の候補)", () => {
     // 555z234m67m234p55s + 1z(末尾)。1z 切り (index13) のみテンパイ維持

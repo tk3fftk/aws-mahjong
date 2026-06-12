@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { GameController } from "./game";
+import { calcScore } from "./score";
 import { mpszToTiles, sortTiles } from "./tiles";
 import { countDoraHan, uraDoraIndicators } from "./dora";
 import { riggedDeal, type RiggedDeal } from "./debug/rigged";
@@ -221,6 +222,17 @@ describe("GameController / ツモ精算 (仕込み壁)", () => {
     expect(winnerDelta).toBe(-koDeltas[0]! * 3);
     expect(s.players.east.score).toBe(25000 + winnerDelta);
     expect(totalScore(game)).toBe(TOTAL_SCORE);
+    // 符: 5s 単騎ツモ = 20 + 5z暗刻8 + 単騎2 + ツモ2 = 32 → 40
+    // (AWS役の偽陽性で totalHan が揺れ得るため han は固定値にせず、支払いは実 han で逆算)
+    expect(s.winInfo!.fu).toBe(40);
+    const expected = calcScore({
+      totalHan: s.winInfo!.totalHan,
+      fu: 40,
+      isDealer: true,
+      isTsumo: true,
+    });
+    expect(expected.kind).toBe("tsumo-dealer");
+    expect(koDeltas[0]).toBe(-(expected as { fromEachKo: number }).fromEachKo);
   });
 });
 

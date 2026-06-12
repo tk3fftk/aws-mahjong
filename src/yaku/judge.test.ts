@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { judgeYaku, hasAnyAwsYaku, canDeclareWin } from "./judge";
+import { judgeYaku, hasAnyAwsYaku, canDeclareWin, type JudgeContext } from "./judge";
 import { canWin } from "../winning/check";
 import { effectiveHandTiles, isMenzenHand } from "../winning/melds";
 import { mpszToTiles } from "../tiles";
@@ -13,14 +13,14 @@ function meld(kind: MeldLike["kind"], mpsz: string): MeldLike {
   return { kind, tiles: toHand(mpsz) };
 }
 
-const baseCtx = {
+const baseCtx: JudgeContext = {
   isTsumo: true,
   isMenzen: true,
   seatWind: "1z",
   roundWind: "1z",
   winningTileId: null,
   melds: [],
-} as const;
+};
 
 describe("judgeYaku", () => {
   it("Kiro(5z刻子) があれば AWS役必須を満たす", () => {

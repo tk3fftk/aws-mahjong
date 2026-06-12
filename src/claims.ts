@@ -48,6 +48,7 @@ export function computeEligibility(input: EligibilityInput): ClaimOffers {
  * ロン可否: 和了形 + AWS役必須 (canDeclareWin) + フリテンでないこと。
  * 和了牌は打牌なので isTsumo=false で判定する。
  * permanentFuriten (リーチ後の見逃しフリテン) のときは以後ロン不可。
+ * 符はゲートに一切関与しない (canDeclareWin + フリテンのみで符非依存)。
  */
 function canRon(input: EligibilityInput): boolean {
   if (input.permanentFuriten) return false;
@@ -60,6 +61,8 @@ function canRon(input: EligibilityInput): boolean {
     seatWind: input.seatWind,
     roundWind: input.roundWind,
     isRiichi: input.isRiichi,
+    winningTileId: input.tile.id,
+    melds: input.melds,
   });
   if (!canDeclareWin(judged.yakus, judged.isYakuman)) return false;
   return !isFuriten(input.hand, input.melds, input.discardedIds);

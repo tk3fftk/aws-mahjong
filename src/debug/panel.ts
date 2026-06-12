@@ -116,6 +116,8 @@ export function debugPanelHtml(state: GameState): string {
     seatWind: me.seatWind,
     roundWind: state.roundWind,
     isRiichi: me.isRiichi,
+    winningTileId: null, // 適格性プレビュー (符は計算しない)
+    melds: me.melds,
   };
 
   const waitsHtml = isWaitingDiscard

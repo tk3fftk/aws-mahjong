@@ -342,6 +342,7 @@ export class GameController {
         seatWind: this.#state.players[seat].seatWind,
         roundWind: this.#state.roundWind,
         isRiichi: player.isRiichi,
+        winningTileId: this.#state.lastDrawTile?.id ?? null,
       },
       riichiAllowed: this.#riichiPreconditionsMet(seat),
       rng: this.#rng,
@@ -642,6 +643,7 @@ export class GameController {
   #canTsumoNow(player: Player): boolean {
     const winForm = canWin(player.hand, player.melds);
     if (!winForm) return false;
+    // 呼び出し元 (#refreshHumanTurnHints) が isHumanDrawTurn で lastDrawTile 非 null をガード済み
     const judged = judgeYaku(winForm, effectiveHandTiles(player.hand, player.melds), {
       isTsumo: true,
       isMenzen: isMenzenHand(player.melds),
@@ -649,6 +651,8 @@ export class GameController {
       roundWind: this.#state.roundWind,
       isRiichi: player.isRiichi,
       isIppatsu: player.isIppatsu,
+      winningTileId: this.#state.lastDrawTile!.id,
+      melds: player.melds,
     });
     return canDeclareWin(judged.yakus, judged.isYakuman);
   }
@@ -680,6 +684,8 @@ export class GameController {
     const concealed = opts.isTsumo ? player.hand : [...player.hand, opts.winTile];
     const winForm = canWin(concealed, player.melds);
     if (!winForm) return { success: false, reason: "和了形ではありません" };
+    // ツモ時の lastDrawTile は呼び出し元でガード済み (humanDeclareTsumo / #cpuTurnStep の
+    // drewThisTurn / #drawRinshan 直後) のため非 null
     const judged = judgeYaku(winForm, effectiveHandTiles(concealed, player.melds), {
       isTsumo: opts.isTsumo,
       isMenzen: isMenzenHand(player.melds),
@@ -687,6 +693,8 @@ export class GameController {
       roundWind: this.#state.roundWind,
       isRiichi: player.isRiichi,
       isIppatsu: player.isIppatsu,
+      winningTileId: opts.isTsumo ? this.#state.lastDrawTile!.id : opts.winTile.id,
+      melds: player.melds,
     });
     if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
       return { success: false, reason: "AWS役がありません" };
@@ -713,9 +721,11 @@ export class GameController {
         }
       }
     }
+    // 国士 (fu=null) は 0 を入れるが、basePoints が han≥13 を符より先に判定するため安全
+    const fu = judged.fu ?? 0;
     const payments = calcScore({
       totalHan,
-      fu: 30, // TODO Phase 5 で実符に置換
+      fu,
       isDealer: player.isDealer,
       isTsumo: opts.isTsumo,
     });
@@ -736,6 +746,7 @@ export class GameController {
       melds: [...player.melds],
       yakus,
       totalHan,
+      fu,
       isYakuman: judged.isYakuman,
       score: payments.total,
       payments: deltas,

@@ -145,6 +145,7 @@ export interface WinInfo {
   melds: CalledMeld[];
   yakus: YakuResult[];
   totalHan: number;
+  fu: number; // 符。役満 (isYakuman) では意味を持たず UI も非表示 (国士は 0)
   isYakuman: boolean;
   score: number; // 勝者の獲得合計
   payments: Array<{ seat: Seat; delta: number }>; // 勝者 +、支払者 −
