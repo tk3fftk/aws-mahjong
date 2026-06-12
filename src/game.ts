@@ -26,10 +26,15 @@ import { judgeYaku, canDeclareWin } from "./yaku/judge";
 import { decideCpuAction, decideClaim } from "./cpu";
 import { CLAIM_PRIORITY, computeEligibility, resolveClaims, seatDistance } from "./claims";
 import { calcScore, type ScorePayments } from "./score";
-import { countDoraHan, doraIndicators, MAX_DORA_INDICATORS } from "./dora";
+import { countDoraHan, doraIndicators, uraDoraIndicators, MAX_DORA_INDICATORS } from "./dora";
+import { riichiDiscardIndices } from "./riichi";
+import { winningTiles } from "./winning/furiten";
 
 // 各プレイヤーの初期持ち点 (麻雀標準)
 const INITIAL_SCORE = 25000;
+
+// リーチ宣言の供託 (リーチ棒)
+const RIICHI_COST = 1000;
 
 // 反復ループの安全弁。1局は最大でも 70巡 × 数アクションで収まる
 const LOOP_GUARD = 1000;
@@ -77,6 +82,9 @@ export class GameController {
   #rng: RNG;
   #onChange: (state: GameState) => void;
   #wallFactory: (rng: RNG) => Tile[];
+  // リーチ宣言打牌中の席。打牌がロンされなかった時点で成立 (#commitRiichi)。
+  // GameState には置かず controller 私有で管理する (D-013)
+  #pendingRiichi: Seat | null = null;
 
   constructor(opts: GameControllerOptions = {}) {
     this.#rng = opts.rng ?? mulberry32(opts.seed ?? Date.now());
@@ -94,6 +102,7 @@ export class GameController {
     for (const seat of SEAT_ORDER) {
       this.#state.players[seat].score = INITIAL_SCORE;
     }
+    this.#state.riichiPot = 0; // 持ち越し供託をクリアしてから配牌
     this.#deal(0);
   }
 
@@ -152,7 +161,10 @@ export class GameController {
       selfKanOptions: [],
       canTsumo: false,
       winInfo: null,
+      riichiPot: this.#state.riichiPot, // 流局時は供託を次局へ持ち越す
+      riichiCandidates: [],
     };
+    this.#pendingRiichi = null;
     this.#refreshHumanTurnHints();
     this.#loop();
     this.#emit();
@@ -160,13 +172,46 @@ export class GameController {
 
   // ---- 公開 API: 人間の操作 ----
 
-  humanDiscard(index: number): void {
-    if (this.#state.phase !== "discard" || this.#state.turn !== "east") return;
+  humanDiscard(index: number): ActionAttempt {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
+      return { success: false, reason: "ターンが違います" };
+    }
     const east = this.#state.players.east;
-    if (index < 0 || index >= east.hand.length) return;
+    if (index < 0 || index >= east.hand.length) {
+      return { success: false, reason: "その牌は選べません" };
+    }
+    // リーチ中はツモ切りのみ (ツモ牌 = lastDrawTile と参照等価。D-010 と同じ規約)
+    if (east.isRiichi && east.hand[index] !== this.#state.lastDrawTile) {
+      return { success: false, reason: "リーチ中はツモ切りのみ" };
+    }
     this.#discard("east", index);
     this.#loop();
     this.#emit();
+    return { success: true };
+  }
+
+  /**
+   * リーチを宣言して打牌する。宣言可能な牌 (riichiCandidates) の index のみ受理。
+   * リーチ成立は「この打牌がロンされなかった時点」(#commitRiichi)。宣言牌がロンされたら不成立。
+   */
+  humanRiichiDiscard(index: number): ActionAttempt {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
+      return { success: false, reason: "ターンが違います" };
+    }
+    if (this.#state.lastDrawTile === null) {
+      return { success: false, reason: "ツモ牌がありません" };
+    }
+    if (!this.#riichiPreconditionsMet("east")) {
+      return { success: false, reason: "リーチできません" };
+    }
+    if (!this.#state.riichiCandidates.includes(index)) {
+      return { success: false, reason: "その牌ではテンパイを保てません" };
+    }
+    this.#pendingRiichi = "east";
+    this.#discard("east", index);
+    this.#loop();
+    this.#emit();
+    return { success: true };
   }
 
   // 人間プレイヤーが手牌を手動で並び替える (from の牌を to の位置へ移動)。
@@ -270,7 +315,14 @@ export class GameController {
     for (let guard = 0; guard < LOOP_GUARD; guard++) {
       const s = this.#state;
       if (s.phase !== "discard") return;
-      if (s.players[s.turn].isHuman) return;
+      const p = s.players[s.turn];
+      if (p.isHuman) {
+        // 通常 or ツモ宣言の機会あり → 人間の入力待ちで停止
+        if (!p.isRiichi || s.canTsumo) return;
+        // リーチ中は手牌固定 → 自動ツモ切り (ツモ牌は末尾)。ツモ可能時は上で停止済み
+        this.#discard("east", p.hand.length - 1);
+        continue;
+      }
       this.#cpuTurnStep();
     }
     throw new Error("game loop did not settle");
@@ -289,13 +341,20 @@ export class GameController {
         isMenzen: isMenzenHand(player.melds),
         seatWind: this.#state.players[seat].seatWind,
         roundWind: this.#state.roundWind,
+        isRiichi: player.isRiichi,
       },
+      riichiAllowed: this.#riichiPreconditionsMet(seat),
       rng: this.#rng,
     });
     if (action.action === "win" && drewThisTurn) {
       const result = this.#tryWin(seat, { isTsumo: true });
       if (result.success) return;
       // canDeclareWin は CPU 側でも確認しているため通常は到達しない
+    }
+    // リーチ済み: 手牌は固定。和了できなければ自動ツモ切り (末尾=ツモ牌)。暗槓も禁止。
+    if (player.isRiichi) {
+      this.#discard(seat, player.hand.length - 1);
+      return;
     }
     if (drewThisTurn) {
       // 暗槓: 和了できないときだけ宣言 (リンシャン後に同席の手番が続く)
@@ -305,6 +364,11 @@ export class GameController {
         return;
       }
     }
+    if (action.action === "riichi") {
+      this.#pendingRiichi = seat;
+      this.#discard(seat, action.tileIndex);
+      return;
+    }
     const idx = action.action === "discard" ? action.tileIndex : 0;
     this.#discard(seat, idx);
   }
@@ -312,6 +376,8 @@ export class GameController {
   /** 手牌 index の牌を河に出し、打牌後のクレーム解決へ */
   #discard(seat: Seat, index: number): void {
     const player = this.#state.players[seat];
+    // 自分の次打牌で一発窓が閉じる (リーチ宣言打牌時は未成立なので isIppatsu=false で無害)
+    if (player.isIppatsu) player.isIppatsu = false;
     const tile = player.hand[index]!;
     // 人間の手動並びは打牌でも崩さない (ソートは CPU のみ)
     const rest = player.hand.filter((_, i) => i !== index);
@@ -335,6 +401,7 @@ export class GameController {
     for (const seat of SEAT_ORDER) {
       if (seat === discarder) continue;
       const p = this.#state.players[seat];
+      // 適格性は今回の打牌より前の permanentFuriten で判定する (初回の待ち牌は本人がロン可能)
       const offers = computeEligibility({
         hand: p.hand,
         melds: p.melds,
@@ -343,10 +410,19 @@ export class GameController {
         isShimocha: nextSeat(discarder) === seat,
         seatWind: this.#state.players[seat].seatWind,
         roundWind: this.#state.roundWind,
+        isRiichi: p.isRiichi,
+        permanentFuriten: p.permanentFuriten,
       });
       // リンシャン牌が無いカンは宣言不可 (セルフカン側のガードと揃える)
       if (this.#state.wall.length === 0) offers.kan = false;
       offersBySeat.set(seat, offers);
+    }
+    // リーチフリテン: リーチ者の待ちに今の打牌が含まれるなら以後ロン不可 (eager set, D-013)。
+    // 適格性判定の後にセットする: 本人が今回ロンするなら局が終わるので無害、見送れば以後フリテン。
+    for (const seat of SEAT_ORDER) {
+      if (seat === discarder) continue;
+      const p = this.#state.players[seat];
+      if (p.isRiichi && p.riichiWaits.includes(tile.id)) p.permanentFuriten = true;
     }
     const cpuClaims: CpuClaim[] = [];
     for (const [seat, offers] of offersBySeat) {
@@ -375,12 +451,22 @@ export class GameController {
   /** クレームの実行: ロン和了 or 副露を作って手番ジャンプ */
   #executeClaim(claim: CpuClaim, discarder: Seat, tile: Tile): void {
     if (claim.kind === "ron") {
+      // 宣言牌がロンされたらリーチ不成立 (棒は出ない。標準ルール)
+      this.#pendingRiichi = null;
       this.#tryWin(claim.seat, { isTsumo: false, winTile: tile, discarder });
       return;
     }
     const player = this.#state.players[claim.seat];
     // 河から取り除く (フリテン履歴 discardedIds には残る)
     this.#state.players[discarder].discards.pop();
+    // 宣言牌がポン/チー/カンされた場合: リーチは成立 (棒は出る) するが一発は付かない。
+    // 横向き位置は「次の打牌」(discards から消えた後の length) を指す (§1-12)。
+    if (this.#pendingRiichi !== null) {
+      const seat = this.#pendingRiichi;
+      this.#commitRiichi(seat, false, this.#state.players[seat].discards.length);
+    }
+    // 任意の副露成立で全席の一発が消える
+    for (const s of SEAT_ORDER) this.#state.players[s].isIppatsu = false;
 
     if (claim.kind === "chi") {
       const pair = claim.chiTiles!;
@@ -423,6 +509,12 @@ export class GameController {
 
   /** 次の席へ手番を移し、山からツモる。山が尽きていれば流局 */
   #advanceToNext(from: Seat): void {
+    // クレームされなかった = リーチ宣言打牌が通った → 成立 (一発あり)。
+    // 壁0チェックの前に行う: 最終打牌リーチが流局しても棒は出る (D-013)。
+    if (this.#pendingRiichi !== null) {
+      const seat = this.#pendingRiichi;
+      this.#commitRiichi(seat, true, this.#state.players[seat].discards.length - 1);
+    }
     const seat = nextSeat(from);
     this.#state.turn = seat;
     if (this.#state.wall.length === 0) {
@@ -505,10 +597,45 @@ export class GameController {
     const east = this.#state.players.east;
     const isHumanDrawTurn =
       this.#state.turn === "east" && this.#state.lastDrawTile !== null;
-    this.#state.selfKanOptions = isHumanDrawTurn
-      ? this.#computeSelfKanOptions(east)
-      : [];
+    // リーチ後はカン (暗槓含む) を全面禁止 → 候補を抑止 (D-013)
+    this.#state.selfKanOptions =
+      isHumanDrawTurn && !east.isRiichi ? this.#computeSelfKanOptions(east) : [];
     this.#state.canTsumo = isHumanDrawTurn && this.#canTsumoNow(east);
+    this.#state.riichiCandidates = this.#riichiPreconditionsMet("east")
+      ? riichiDiscardIndices(east.hand, east.melds)
+      : [];
+  }
+
+  /**
+   * リーチ宣言の前提条件 (テンパイを保つ打牌の有無は別途 riichiDiscardIndices で確認):
+   * その席のツモ直後 / 門前 / 1000点以上 / ライブ壁≥1 / 未リーチ。
+   * ライブ壁≥1 は最簡採用 (本プロジェクトはノーテン罰符・形式テンパイ概念なし。D-013)。
+   */
+  #riichiPreconditionsMet(seat: Seat): boolean {
+    const p = this.#state.players[seat];
+    return (
+      this.#state.turn === seat &&
+      this.#state.lastDrawTile !== null &&
+      !p.isRiichi &&
+      isMenzenHand(p.melds) &&
+      p.score >= RIICHI_COST &&
+      this.#state.wall.length >= 1
+    );
+  }
+
+  /**
+   * リーチ成立を確定する: 供託支払い・isRiichi・一発フラグ・待ち固定・横向き位置を記録。
+   * withIppatsu はクレームされず通った宣言 (#advanceToNext) のみ true。
+   */
+  #commitRiichi(seat: Seat, withIppatsu: boolean, riichiDiscardIndex: number): void {
+    const p = this.#state.players[seat];
+    p.score -= RIICHI_COST;
+    this.#state.riichiPot += RIICHI_COST;
+    p.isRiichi = true;
+    p.isIppatsu = withIppatsu;
+    p.riichiWaits = winningTiles(p.hand, p.melds);
+    p.riichiDiscardIndex = riichiDiscardIndex;
+    this.#pendingRiichi = null;
   }
 
   /** ツモ和了が宣言可能か (UI のボタン活性用)。判定規約は #tryWin と同一 */
@@ -520,6 +647,8 @@ export class GameController {
       isMenzen: isMenzenHand(player.melds),
       seatWind: player.seatWind,
       roundWind: this.#state.roundWind,
+      isRiichi: player.isRiichi,
+      isIppatsu: player.isIppatsu,
     });
     return canDeclareWin(judged.yakus, judged.isYakuman);
   }
@@ -556,24 +685,32 @@ export class GameController {
       isMenzen: isMenzenHand(player.melds),
       seatWind: this.#state.players[seat].seatWind,
       roundWind: this.#state.roundWind,
+      isRiichi: player.isRiichi,
+      isIppatsu: player.isIppatsu,
     });
     if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
       return { success: false, reason: "AWS役がありません" };
     }
-    // ドラは役ではない: AWS役ゲート通過後に飜だけ加算する。役満には乗せない (D-012)。
+    // ドラ・裏ドラは役ではない: AWS役ゲート通過後に飜だけ加算する。役満には乗せない (D-012/D-013)。
     // effectiveHandTiles はカン4枚目を落とす (D-009 項5) ため、ここでは副露の全牌を使う。
     let yakus = judged.yakus;
     let totalHan = judged.totalHan;
+    const allTileIds = [...concealed, ...player.melds.flatMap((m) => m.tiles)].map((t) => t.id);
     if (!judged.isYakuman) {
       const indicators = doraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount);
-      const allTileIds = [...concealed, ...player.melds.flatMap((m) => m.tiles)].map((t) => t.id);
-      const doraHan = countDoraHan(
-        allTileIds,
-        indicators.map((t) => t.id),
-      );
+      const doraHan = countDoraHan(allTileIds, indicators.map((t) => t.id));
       if (doraHan > 0) {
         yakus = [...yakus, { id: "dora", name: "ドラ", han: doraHan }];
         totalHan += doraHan;
+      }
+      // 裏ドラはリーチ和了者のみ。表ドラと同じ全牌リストで数える (D-013)
+      if (player.isRiichi) {
+        const uraInd = uraDoraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount);
+        const uraHan = countDoraHan(allTileIds, uraInd.map((t) => t.id));
+        if (uraHan > 0) {
+          yakus = [...yakus, { id: "ura-dora", name: "裏ドラ", han: uraHan }];
+          totalHan += uraHan;
+        }
       }
     }
     const payments = calcScore({
@@ -583,6 +720,13 @@ export class GameController {
     });
     const discarder = opts.isTsumo ? null : opts.discarder;
     const deltas = this.#applyPayments(seat, discarder, payments);
+    // 供託 (リーチ棒) は和了者が総取り。payments とは別枠 (payments 合計は 0 のまま)
+    const riichiPotWon = this.#state.riichiPot;
+    this.#state.players[seat].score += riichiPotWon;
+    this.#state.riichiPot = 0;
+    const uraIndicators = player.isRiichi
+      ? uraDoraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount).map((t) => t.id)
+      : null;
     this.#state.winInfo = {
       winner: seat,
       isTsumo: opts.isTsumo,
@@ -594,6 +738,8 @@ export class GameController {
       isYakuman: judged.isYakuman,
       score: payments.total,
       payments: deltas,
+      uraIndicators,
+      riichiPotWon,
     };
     this.#state.phase = "win";
     this.#state.claim = null;
@@ -686,6 +832,11 @@ function makePlayer(
     isHuman: seat === "east",
     isDealer,
     score,
+    isRiichi: false,
+    isIppatsu: false,
+    riichiWaits: [],
+    permanentFuriten: false,
+    riichiDiscardIndex: null,
   };
 }
 
@@ -710,6 +861,8 @@ function createInitialState(): GameState {
     selfKanOptions: [],
     canTsumo: false,
     winInfo: null,
+    riichiPot: 0,
+    riichiCandidates: [],
   };
 }
 

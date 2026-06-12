@@ -156,3 +156,73 @@ describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
     expect(concealed).toHaveLength(11);
   });
 });
+
+describe("judgeYaku / リーチ・一発 (judge.ts トップレベル付与)", () => {
+  it("標準形 + isRiichi → yakus に riichi(1飜)、totalHan +1", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const base = judgeYaku(winForm, hand, baseCtx);
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isRiichi: true });
+    expect(result.yakus.find((y) => y.id === "riichi")).toEqual({
+      id: "riichi",
+      name: "リーチ",
+      han: 1,
+    });
+    expect(result.totalHan).toBe(base.totalHan + 1);
+  });
+
+  it("isRiichi + isIppatsu → riichi + ippatsu で +2", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const base = judgeYaku(winForm, hand, baseCtx);
+    const result = judgeYaku(winForm, hand, {
+      ...baseCtx,
+      isRiichi: true,
+      isIppatsu: true,
+    });
+    expect(result.yakus.find((y) => y.id === "riichi")?.han).toBe(1);
+    expect(result.yakus.find((y) => y.id === "ippatsu")?.han).toBe(1);
+    expect(result.totalHan).toBe(base.totalHan + 2);
+  });
+
+  it("isIppatsu のみ (isRiichi なし) → 一発は付かない", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isIppatsu: true });
+    expect(result.yakus.find((y) => y.id === "ippatsu")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "riichi")).toBeUndefined();
+  });
+
+  it("七対子 + isRiichi → riichi が付く", () => {
+    const hand = toHand("11m22m66m33p44s55z77z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isRiichi: true });
+    expect(result.yakus.find((y) => y.id === "chiitoitsu")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "riichi")).toBeTruthy();
+  });
+
+  it("国士無双 (役満) + isRiichi → riichi は付かない", () => {
+    const hand = toHand("1m9m1p9p1s9s1z2z3z4z5z6z7z1z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isRiichi: true });
+    expect(result.isYakuman).toBe(true);
+    expect(result.yakus.find((y) => y.id === "riichi")).toBeUndefined();
+  });
+
+  it("ctx 省略 (既存呼び出し) → 従来どおり riichi/ippatsu は付かない", () => {
+    const hand = toHand("555z234m567m234p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "riichi")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "ippatsu")).toBeUndefined();
+  });
+
+  it("AWS役ゲート: リーチ・一発・門前清自摸和だけでは和了不可 (標準役のみ)", () => {
+    const yakus = [
+      { id: "riichi", name: "リーチ", han: 1 },
+      { id: "ippatsu", name: "一発", han: 1 },
+      { id: "menzen-tsumo", name: "門前清自摸和", han: 1 },
+    ];
+    expect(canDeclareWin(yakus, false)).toBe(false);
+  });
+});

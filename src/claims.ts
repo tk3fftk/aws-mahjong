@@ -27,24 +27,30 @@ export interface EligibilityInput {
   isShimocha: boolean; // 自分が打牌者の下家か (チーは上家からのみ)
   seatWind: SeatWind;
   roundWind: SeatWind;
+  isRiichi?: boolean; // true ならロン以外 (ポン/カン/チー) を抑止
+  permanentFuriten?: boolean; // true ならロンも不可 (リーチ後の見逃しフリテン)
 }
 
 /** 1人のプレイヤーが打牌に対して宣言できるクレームを列挙する */
 export function computeEligibility(input: EligibilityInput): ClaimOffers {
   const sameCount = input.hand.filter((t) => t.id === input.tile.id).length;
+  // リーチ者は手牌が固定されるため、ロン以外のクレーム (ポン/カン/チー) はできない
+  const canMeld = !input.isRiichi;
   return {
     ron: canRon(input),
-    pon: sameCount >= PON_TILES_IN_HAND,
-    kan: sameCount >= KAN_TILES_IN_HAND,
-    chi: input.isShimocha ? chiVariants(input.hand, input.tile) : [],
+    pon: canMeld && sameCount >= PON_TILES_IN_HAND,
+    kan: canMeld && sameCount >= KAN_TILES_IN_HAND,
+    chi: canMeld && input.isShimocha ? chiVariants(input.hand, input.tile) : [],
   };
 }
 
 /**
  * ロン可否: 和了形 + AWS役必須 (canDeclareWin) + フリテンでないこと。
  * 和了牌は打牌なので isTsumo=false で判定する。
+ * permanentFuriten (リーチ後の見逃しフリテン) のときは以後ロン不可。
  */
 function canRon(input: EligibilityInput): boolean {
+  if (input.permanentFuriten) return false;
   const concealed = [...input.hand, input.tile];
   const winForm = canWin(concealed, input.melds);
   if (!winForm) return false;
@@ -53,6 +59,7 @@ function canRon(input: EligibilityInput): boolean {
     isMenzen: isMenzenHand(input.melds),
     seatWind: input.seatWind,
     roundWind: input.roundWind,
+    isRiichi: input.isRiichi,
   });
   if (!canDeclareWin(judged.yakus, judged.isYakuman)) return false;
   return !isFuriten(input.hand, input.melds, input.discardedIds);

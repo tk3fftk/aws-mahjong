@@ -159,3 +159,30 @@
   - 新規 `src/dora.ts` は `tiles.ts`/`types.ts` のみ依存 (01-architecture の依存ルール準拠)。`game.ts`・`ui/render.ts` が import
   - UI は5スロット固定表示・未公開は裏向き (`render.ts:centerSquare`)。`ui/styles.css` の `.center-info .dora-row`
   - **スコープ外 (残)**: 裏ドラの公開 (リーチで実装。スロット予約済み)、赤ドラ、リンシャンを王牌から取る厳密実装
+
+---
+
+## D-013: リーチ (一発 / 裏ドラ / 自動ツモ切り / 供託 / CPUリーチ)
+
+- **What**: リーチを実装 (2026-06)。設計の要点 (実装計画 `feature-riichi.md` の確定版):
+  - **役の配線**: リーチ (1飜, id `riichi`)・一発 (1飜, id `ippatsu`) は分解非依存なので `yaku/judge.ts` のトップレベルで付与 (七対子・標準形の両方に効く。国士無双=役満には付けない)。`JudgeContext` に `isRiichi?`/`isIppatsu?` を**オプショナル**追加し既存約190テストを温存。一発は `isRiichi && isIppatsu` のときのみ
+  - **AWS役ゲートとの関係**: リーチ・一発は標準役なので `canDeclareWin` (AWS役必須ゲート) を**満たさない**。リーチのみの手は和了不可 — これは仕様 (`game.test.ts` の AWS役ゲートテストで固定)
+  - **裏ドラ**: リーチ和了者のみ `countDoraHan(全牌, uraDoraIndicators(deadWall, doraIndicatorCount))` を計算し `{id:"ura-dora"}` 行として totalHan へ加算 (ゲート通過後・役満時スキップ、D-012 のドラ加算と同じブロック)。**牌リストは表ドラと同じ `[...concealed, ...melds.flatMap]`** (`effectiveHandTiles` 不使用)。`WinInfo.uraIndicators` は非リーチ和了で null
+  - **供託**: `GameState.riichiPot` (点)。リーチ成立で −1000 / pot +1000、和了者が総取り (`WinInfo.riichiPotWon`、payments とは別枠で payments 合計は 0 のまま)。流局時は `#deal` が次局へ持ち越し。不変条件 **`Σ score + riichiPot === 100000`**
+  - **リーチ成立タイミング**: 宣言打牌がロンされなかった時点で成立。controller 私有 `#pendingRiichi: Seat | null` で管理し、`#advanceToNext` (クレームなし=一発あり) / `#executeClaim` 非ロン分岐 (ポン等=一発なし) で `#commitRiichi`、ロン分岐で取り消し (棒も出ない)
+  - **リーチ後ロック**: 以後は自動ツモ切り。`#loop` が「人間 & isRiichi & !canTsumo」のとき末尾 (ツモ牌) を自動打牌。`canTsumo` のときだけ停止 (ツモ宣言の機会)。CPU も `ctx.isRiichi` で末尾ツモ切り。**リーチ後のカンは全面禁止** (`#refreshHumanTurnHints` で `selfKanOptions` 抑止、`#cpuTurnStep` で暗槓スキップ)
+  - **一発の消滅**: (a) リーチ者自身の次打牌完了 (`#discard` 冒頭で自席 `isIppatsu=false`)、(b) 任意の副露成立 (`#executeClaim` 非ロン分岐で全席 `isIppatsu=false`)。ロン見逃しでは消えない
+  - **リーチフリテン**: `Player.permanentFuriten`。`#afterDiscard` で「リーチ者の待ち (`riichiWaits`、成立時に固定) に打牌が含まれる」とき eager set。**適格性判定の後にセットする**ことで「初回の待ち牌は本人がロン可能、見送れば以後ロン不可」を満たす。`claims.ts:canRon` が `permanentFuriten` で拒否
+  - **クレーム適格性**: リーチ者はロン以外のクレーム不可 (`computeEligibility` に `isRiichi` を渡し pon/kan/chi を抑止 — これがないと CPU リーチ者が役牌をポンしてしまう)
+  - **CPU リーチ**: `decideCpuAction` が `riichiAllowed` (門前・1000点・ライブ壁≥1・未リーチを controller が判定) かつテンパイ維持打牌があれば最初の候補で宣言 (dumb)。win は riichi より優先
+  - **宣言条件 (最簡)**: 門前 / テンパイを保つ打牌が存在 / `score >= 1000` / **ライブ壁 ≥ 1** (標準は≥4だが本プロジェクトはノーテン罰符・形式テンパイ概念なしのため ≥1) / 未リーチ
+  - **横向き表示**: `Player.riichiDiscardIndex` (discards の添字)。`#advanceToNext` 経由なら `discards.length - 1`、ポン等で河から消えた後なら `discards.length` (次打牌位置)
+- **Why**:
+  - **自動ツモ切り採用**: リーチ後は手牌が固定され人間の打牌入力は無意味。`#loop` の停止条件1行 (`!isRiichi || canTsumo`) で人間・CPU 共通に扱え、D-009 の不変条件「公開メソッド復帰後 `phase==='discard'` ⇒ `turn==='east'`」も維持できる
+  - **宣言牌ロンの pending 方式**: リーチ棒は「打牌が通った」後に出る (標準ルール)。打牌時点では未確定なので `#pendingRiichi` に退避し、クレーム解決の分岐で成立/取消を確定する
+  - **eager フリテン**: リーチ者は待ちを変えられないので、待ち牌が場に出た瞬間に「ロンするか永久フリテンか」が決まる。適格性判定の後にフラグを立てれば、初回ロンは可能・見送り後は不可、という標準挙動を最小コードで実現できる (CPU は `decideClaim` が常にロンするため見逃しは起きないが、AWS役ゲートでロンできず待ち牌が流れたケースも同じ機構で正しくフリテンになる)
+- **Consequences**:
+  - `humanDiscard` が `void` → `ActionAttempt` 返却に変更 (リーチ中の非ツモ牌打牌をトーストで拒否するため。既存テストは戻り値を見ていないので互換)。新 API `humanRiichiDiscard(index): ActionAttempt`
+  - **既知の制限 (残課題)**: ダブル立直なし / リーチ後のカン全面禁止 (待ち変化・ドラめくりの複雑さ回避) / 同巡フリテンはスコープ外 / 東4終了時に残った供託は誰にも渡らず消滅 (最終順位は score のみ)
+  - CPU リーチで供託が出るため、局を跨ぐ既存テストの `Σ score === 100000` 断言は `Σ score + riichiPot === 100000` に更新 (`game.test.ts` の局送りテスト)
+  - 新規 `src/riichi.ts` (`riichiDiscardIndices`)。UI は `render.ts` (リーチボタン・armed ハイライト・横向き牌・供託/裏ドラ表示) と `main.ts` (`riichiArmed` トグル)、`ui/styles.css` の `.riichi-*`

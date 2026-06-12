@@ -137,3 +137,39 @@ describe("seatDistance", () => {
     expect(seatDistance("north", "east", SEAT_ORDER)).toBe(1);
   });
 });
+
+describe("computeEligibility / リーチ者の適格性", () => {
+  // 5z刻子(Kiro)で和了形になる手。5z をポンもロンもでき得る形を作る。
+  const RIICHI_HAND = "55z234m567m234p55s"; // 5z シャンポン待ち + Kiro でロン可
+  function withFlags(opts: { isRiichi?: boolean; permanentFuriten?: boolean }) {
+    return computeEligibility({
+      hand: toTiles(RIICHI_HAND),
+      melds: [],
+      discardedIds: [],
+      tile: tile("5z"),
+      isShimocha: true,
+      seatWind: "2z",
+      roundWind: "1z",
+      ...opts,
+    });
+  }
+
+  it("isRiichi: ロンは可・ポン/カン/チーは手牌が揃っていても false", () => {
+    const offers = withFlags({ isRiichi: true });
+    expect(offers.ron).toBe(true);
+    expect(offers.pon).toBe(false);
+    expect(offers.kan).toBe(false);
+    expect(offers.chi).toEqual([]);
+  });
+
+  it("permanentFuriten: 和了形でもロン不可", () => {
+    const offers = withFlags({ isRiichi: true, permanentFuriten: true });
+    expect(offers.ron).toBe(false);
+  });
+
+  it("両フラグ省略: 従来どおりポンもロンもできる", () => {
+    const offers = withFlags({});
+    expect(offers.ron).toBe(true);
+    expect(offers.pon).toBe(true);
+  });
+});

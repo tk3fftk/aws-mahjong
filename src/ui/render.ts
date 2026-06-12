@@ -17,11 +17,15 @@ export interface RenderHandlers {
   onClaimChi: (optionIndex: number) => void;
   onClaimPass: () => void;
   onSelfKan: (optionIndex: number) => void;
+  // リーチボタンのトグル (armed モードの ON/OFF)。打牌自体は onTileClick 経由
+  onRiichiToggle: () => void;
 }
 
 // 手牌の選択状態など、ゲーム状態には属さない一時的なUI状態。
 export interface UiState {
   selectedHandIndex: number | null;
+  // リーチ宣言の「armed」モード: ON のとき候補牌を1クリックで宣言打牌する
+  riichiArmed: boolean;
 }
 
 // 卓の配置: 自分 (east) が下辺固定。ターン順は east→south→west→north なので、
@@ -139,6 +143,7 @@ function centerSquare(state: GameState): string {
         <b>${ROUND_WIND_NAME[player.seatWind]}</b>
         <span class="chip-score">${player.score}</span>
         ${player.isDealer ? '<span class="dealer">親</span>' : ""}
+        ${player.isRiichi ? '<span class="riichi-stick">リーチ</span>' : ""}
       </div>
     `;
   }).join("");
@@ -155,6 +160,7 @@ function centerSquare(state: GameState): string {
       <div class="center-info">
         <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</div>
         <div class="wall">山 ${state.wall.length}</div>
+        ${state.riichiPot > 0 ? `<div class="pot">供託 ${state.riichiPot}</div>` : ""}
         <div class="dora-row" title="ドラ表示牌">${doraTiles}</div>
       </div>
       ${chips}
@@ -165,6 +171,7 @@ function centerSquare(state: GameState): string {
 function handArea(state: GameState, ui: UiState): string {
   const east = state.players.east;
   const isMyTurn = state.turn === "east" && state.phase === "discard";
+  const armed = ui.riichiArmed && state.riichiCandidates.length > 0;
   // ツモ牌は手動並び替えで位置が変わりうるので、位置ではなく参照等価で判定する。
   // (game.ts は同一 Tile オブジェクトを hand と lastDrawTile の両方に格納している)
   const handHtml = east.hand
@@ -172,6 +179,12 @@ function handArea(state: GameState, ui: UiState): string {
       const isDrawn = t === state.lastDrawTile;
       // ツモ牌の左マージン(分離表示)は、実際に末尾にあるときだけ付ける。
       const isSeparated = isDrawn && i === east.hand.length - 1;
+      // armed モードでは宣言可能な牌だけを強調し、それ以外は薄くしてクリック不可にする
+      const riichiClass = armed
+        ? state.riichiCandidates.includes(i)
+          ? "riichi-ok"
+          : "riichi-ng"
+        : undefined;
       return renderTile(t, {
         variant: "hand",
         clickable: isMyTurn,
@@ -179,13 +192,15 @@ function handArea(state: GameState, ui: UiState): string {
         index: i,
         highlight: isDrawn,
         selected: i === ui.selectedHandIndex,
-        extraClass: isSeparated ? "draw-separated" : undefined,
+        extraClass: [isSeparated ? "draw-separated" : "", riichiClass ?? ""]
+          .filter(Boolean)
+          .join(" ") || undefined,
       });
     })
     .join("");
   return `
     <div class="hand-area">
-      ${actionsHtml(state)}
+      ${actionsHtml(state, ui)}
       <div class="hand-bar">
         <div class="hand-row">${handHtml}</div>
         ${meldsRow(east, "human-melds")}
@@ -231,7 +246,12 @@ function riverHtml(state: GameState, player: Player): string {
       i === player.discards.length - 1 &&
       t.id === last.tile.id &&
       t.copy === last.tile.copy;
-    return renderTile(t, { variant: "discard", extraClass: isLast ? "last-discard" : "" });
+    // リーチ宣言牌は横向き表示 (discards に残っている範囲のみ。鳴かれて消えた場合は次の打牌位置)
+    const isRiichiTile = player.riichiDiscardIndex === i && i < player.discards.length;
+    const classes = [isLast ? "last-discard" : "", isRiichiTile ? "riichi-tile" : ""]
+      .filter(Boolean)
+      .join(" ");
+    return renderTile(t, { variant: "discard", extraClass: classes });
   });
   // 6枚×2段 + 3段目は無制限に横へ伸びる (河は18枚を超えうる)
   const rows = [tiles.slice(0, 6), tiles.slice(6, 12), tiles.slice(12)];
@@ -242,7 +262,7 @@ function riverHtml(state: GameState, player: Player): string {
   return `<div class="river">${rowsHtml}</div>`;
 }
 
-function actionsHtml(state: GameState): string {
+function actionsHtml(state: GameState, ui: UiState): string {
   if (state.phase === "claim" && state.claim) {
     const claim = state.claim;
     const chiButtons = claim.offers.chi
@@ -280,9 +300,15 @@ function actionsHtml(state: GameState): string {
         )
         .join("")
     : "";
+  // リーチボタン: 宣言可能な打牌があるときだけ表示。armed 中は押下状態を示す
+  const riichiButton =
+    isMyTurn && state.riichiCandidates.length > 0
+      ? `<button data-action="riichi" class="riichi${ui.riichiArmed ? " armed" : ""}">リーチ</button>`
+      : "";
   return `
     <div class="actions">
       <button data-action="tsumo" ${canTsumo ? "" : "disabled"}>ツモ和了</button>
+      ${riichiButton}
       ${selfKanButtons}
     </div>
   `;
@@ -344,17 +370,31 @@ function winPanel(state: GameState, info: WinInfo): string {
     info.loserSeat !== null
       ? `<p class="loser-label">放銃: ${seatName(state.players[info.loserSeat])}</p>`
       : "";
+  // 裏ドラ表示牌 (リーチ和了のみ非 null)。裏ドラ飜は yakus の「裏ドラ」行として既に表示される
+  const uraRow =
+    info.uraIndicators !== null
+      ? `<div class="row ura-row" title="裏ドラ表示牌">
+          <span class="ura-label">裏ドラ</span>
+          ${info.uraIndicators.map((id) => renderTileById(id, { variant: "discard" })).join("")}
+        </div>`
+      : "";
+  // 供託 (リーチ棒) の獲得は payments とは別枠で表示する
+  const potRow =
+    info.riichiPotWon > 0
+      ? `<li class="pot-won"><span>供託</span><span>+${info.riichiPotWon}</span></li>`
+      : "";
   return `
     <h2>${winnerLabel} の${info.isTsumo ? "ツモ" : "ロン"}和了!</h2>
     ${loser}
     <div class="row">${tiles}</div>
     ${meldTiles ? `<div class="melds">${meldTiles}</div>` : ""}
+    ${uraRow}
     <ul class="yaku-list">${yakuItems}</ul>
     <div class="row" style="justify-content: space-between;">
       <span>合計 ${info.totalHan} 飜${info.isYakuman ? " (役満)" : ""}</span>
       <span>${info.score} 点</span>
     </div>
-    <ul class="yaku-list payments">${paymentRows}</ul>
+    <ul class="yaku-list payments">${paymentRows}${potRow}</ul>
   `;
 }
 
@@ -433,6 +473,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
   on('button[data-action="claim-kan"]', () => handlers.onClaimKan());
   on('button[data-action="claim-pon"]', () => handlers.onClaimPon());
   on('button[data-action="claim-pass"]', () => handlers.onClaimPass());
+  on('button[data-action="riichi"]', () => handlers.onRiichiToggle());
   root.querySelectorAll<HTMLElement>('button[data-action="claim-chi"]').forEach((el) => {
     el.addEventListener("click", () => handlers.onClaimChi(Number(el.dataset.chi)));
   });

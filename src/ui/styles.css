@@ -178,6 +178,58 @@ h1 {
   outline: 2px solid var(--accent);
 }
 
+/* ---- リーチ ---- */
+
+/* 横向きリーチ牌: 回転はレイアウトボックスを変えないので、はみ出す分を margin で確保する。
+   .river-row は flex なので行の高さは他の牌が維持する (3段目オーバーフローも崩れない) */
+.tile.discard.riichi-tile {
+  transform: rotate(-90deg);
+  margin-inline: calc((var(--tile-discard-h) - var(--tile-discard-w)) / 2);
+}
+
+/* armed モード: 宣言可能な牌を強調し、非候補は薄くしてクリック不可にする */
+.tile.hand.riichi-ok {
+  outline: 2px solid #e74c3c;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+}
+.tile.hand.riichi-ng {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* 点数チップ内のリーチ表示 (1000点棒風の赤バッジ) */
+.score-chip .riichi-stick {
+  background: #e74c3c;
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 700;
+  font-size: 0.78em;
+}
+
+/* 中央の供託表示 */
+.center-info .pot {
+  color: #e74c3c;
+  font-weight: 700;
+}
+
+/* リーチボタンの押下 (armed) 状態 */
+button.riichi.armed {
+  background: #e74c3c;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.7);
+}
+
+/* 和了モーダルの裏ドラ表示牌の行 */
+.modal .ura-row {
+  align-items: center;
+  gap: 4px;
+}
+.modal .ura-row .ura-label {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
 /* ---- 卓 (正方形 3x3 グリッド) ---- */
 
 .table {

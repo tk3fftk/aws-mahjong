@@ -16,6 +16,19 @@ export interface JudgeContext {
   isMenzen: boolean;
   seatWind: SeatWind;
   roundWind: SeatWind;
+  isRiichi?: boolean; // 省略時 false
+  isIppatsu?: boolean; // 省略時 false。isRiichi=true のときのみ有効
+}
+
+/**
+ * リーチ・一発は分解非依存なので judge.ts のトップレベルで付与する (七対子・標準形の両方に効く)。
+ * 国士無双 = 役満には付けない (点数が変わらず表示も純粋になるため。kokushi 分岐は早期 return で除外)。
+ */
+function riichiYakus(ctx: JudgeContext): YakuResult[] {
+  if (!ctx.isRiichi) return [];
+  const out: YakuResult[] = [{ id: "riichi", name: "リーチ", han: 1 }];
+  if (ctx.isIppatsu) out.push({ id: "ippatsu", name: "一発", han: 1 });
+  return out;
 }
 
 export function judgeYaku(
@@ -53,6 +66,7 @@ export function judgeYaku(
     // AWS固有役 (dr-architecture など 七対子型)
     const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
     yakus.push(...awsYakus);
+    yakus.push(...riichiYakus(ctx));
     return finalize(yakus);
   }
 
@@ -75,7 +89,8 @@ export function judgeYaku(
       best = combined;
     }
   }
-  return finalize(best);
+  // リーチ・一発は分解非依存の定数加算なので best 選択後に付与する
+  return finalize([...best, ...riichiYakus(ctx)]);
 }
 
 function finalize(yakus: YakuResult[]): JudgeResult {

@@ -32,6 +32,11 @@ export interface Player {
   isHuman: boolean;
   isDealer: boolean;
   score: number;
+  isRiichi: boolean; // リーチ成立済みか
+  isIppatsu: boolean; // 一発の権利が残っているか (isRiichi=true のときのみ意味を持つ)
+  riichiWaits: TileId[]; // リーチ成立時に固定した待ち牌 (未リーチは空配列)
+  permanentFuriten: boolean; // リーチ後に待ち牌を見逃した (以後ロン不可、ツモは可)
+  riichiDiscardIndex: number | null; // 河の横向き表示位置 (discards の添字)。未リーチは null
 }
 
 export type Phase =
@@ -89,6 +94,8 @@ export interface GameState {
   selfKanOptions: SelfKanOption[]; // 人間の手番中の暗槓/加槓候補
   canTsumo: boolean; // 人間がツモ和了宣言できるか (UI のボタン活性用)
   winInfo: WinInfo | null;
+  riichiPot: number; // 場の供託 (リーチ棒合計、点)。流局で次局へ持ち越し。和了者が総取り
+  riichiCandidates: number[]; // 人間が今リーチ宣言できる打牌 index (不可なら空)。UI のボタン活性 + 牌ハイライト用
 }
 
 export type MeldKind = "chi" | "pon" | "pair";
@@ -141,4 +148,7 @@ export interface WinInfo {
   isYakuman: boolean;
   score: number; // 勝者の獲得合計
   payments: Array<{ seat: Seat; delta: number }>; // 勝者 +、支払者 −
+  // 裏ドラの飜は yakus の {id:"ura-dora"} 行として totalHan に算入済み
+  uraIndicators: TileId[] | null; // 公開した裏ドラ表示牌 (非リーチ和了は null)
+  riichiPotWon: number; // 獲得した供託 (payments とは別枠。payments の合計は引き続き 0)
 }

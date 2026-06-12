@@ -3,23 +3,29 @@ import { isDragon } from "./tiles";
 import { canWin } from "./winning/check";
 import { effectiveHandTiles } from "./winning/melds";
 import { judgeYaku, canDeclareWin } from "./yaku/judge";
+import { riichiDiscardIndices } from "./riichi";
 
 export interface CpuContext {
   isTsumo: boolean;
   isMenzen: boolean;
   seatWind: SeatWind;
   roundWind: SeatWind;
+  isRiichi: boolean; // 既にリーチ済みか (手牌が固定されツモ切りのみになる)
 }
 
 export interface CpuInput {
   hand: Tile[];
   melds?: MeldLike[];
   ctx: CpuContext;
+  // 門前・1000点・ライブ壁≥1・未リーチを controller が判定済みのときだけ true。
+  // テンパイを保つ打牌の有無は decideCpuAction 側で判定する
+  riichiAllowed?: boolean;
   rng: () => number;
 }
 
 export type CpuAction =
   | { action: "win" }
+  | { action: "riichi"; tileIndex: number }
   | { action: "discard"; tileIndex: number };
 
 export function decideCpuAction(input: CpuInput): CpuAction {
@@ -30,6 +36,17 @@ export function decideCpuAction(input: CpuInput): CpuAction {
     const result = judgeYaku(win, effectiveHandTiles(input.hand, melds), input.ctx);
     if (canDeclareWin(result.yakus, result.isYakuman)) {
       return { action: "win" };
+    }
+  }
+  // 既にリーチ済みなら手牌は固定 → ツモ切り (末尾 = ツモ牌)
+  if (input.ctx.isRiichi) {
+    return { action: "discard", tileIndex: input.hand.length - 1 };
+  }
+  // リーチ可能かつテンパイを保つ打牌があれば最初の候補で宣言 (dumb で十分)
+  if (input.riichiAllowed) {
+    const candidates = riichiDiscardIndices(input.hand, melds);
+    if (candidates.length > 0) {
+      return { action: "riichi", tileIndex: candidates[0]! };
     }
   }
   const idx = Math.min(

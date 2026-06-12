@@ -25,17 +25,20 @@
 
 ## 中期 (1-2週)
 
-### リーチ
+### ~~リーチ~~ ✅ 実装済み (2026-06)
 
-- `Player.isRiichi: boolean` 追加、リーチ宣言時 1000点棒を場に出すUI
-- 一発・裏ドラの実装 (裏ドラ表示スロット `deadWall[5..9]` とアクセサ `uraDoraIndicators` は D-012 で予約済み)
-- 役満特例の対象に「ダブル立直」(2飜役) が含まれていない点に注意
-- 影響: `Player`, `game.ts`, `yaku/standard.ts`, `ui/`
+- リーチ役 (1飜)・一発 (1飜)・裏ドラ・手牌ロック (自動ツモ切り)・供託1000点・CPU リーチを実装。純粋層は `src/riichi.ts` (`riichiDiscardIndices`)、状態は `Player.isRiichi`/`isIppatsu`/`riichiWaits`/`permanentFuriten`/`riichiDiscardIndex` と `GameState.riichiPot`/`riichiCandidates`。設計判断は [D-013](./04-design-decisions.md#d-013-リーチ-一発--裏ドラ--自動ツモ切り--供託--cpuリーチ)
+- リーチ・一発は標準役なので AWS役必須ゲートを満たさない (リーチのみでは和了不可) — 仕様としてテストで固定
+- **残課題**:
+  - **ダブル立直** (配牌リーチ): 未実装。役満特例の対象に「ダブル立直」(2飜役) が含まれていない点も保留 (将来の役満特例見直しと同時に)
+  - **リーチ後のカン**: 暗槓含め全面禁止 (待ち変化判定・ドラめくりの複雑さ回避)。将来、送りカン禁止判定を入れて解禁し得る
+  - **同巡フリテン**: スコープ外 (永久フリテン `permanentFuriten` のみ実装)
+  - **終局時の残置供託**: 東4終了時に場に残った供託は誰にも渡らず消滅 (最終順位は score のみ。最簡で十分)
 
 ### ~~ドラ表示牌~~ ✅ 実装済み (2026-06)
 
 - `src/dora.ts` (純関数 `nextTile`/`countDoraHan`/`doraIndicators`)、`GameState.doraIndicatorCount`、カンドラ即公開、和了時のドラ加算 (ゲート後・役満非加算)、UI のドラ行 (5スロット固定・未公開は裏向き) を実装。設計判断は [D-012](./04-design-decisions.md#d-012-ドラ表示牌-カンドラ-王牌レイアウト)
-- 残: 裏ドラ (リーチ実装で公開。スロット `deadWall[5..9]` とアクセサ `uraDoraIndicators` は予約済み)
+- 裏ドラはリーチ実装 ([D-013](./04-design-decisions.md#d-013-リーチ-一発--裏ドラ--自動ツモ切り--供託--cpuリーチ)) で公開済み (スロット `deadWall[5..9]` / アクセサ `uraDoraIndicators`)
 
 ### 符30固定 → calcFu
 

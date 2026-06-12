@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GameController } from "./game";
 import { ALL_TILE_IDS, mpszToTiles, sortTiles } from "./tiles";
+import { countDoraHan, uraDoraIndicators } from "./dora";
 import type { Copy, Seat, Tile, TileId } from "./types";
 
 const ALL_SEATS: Seat[] = ["east", "south", "west", "north"];
@@ -312,7 +313,9 @@ describe("GameController / ロン", () => {
   it("人間がロン可能な打牌で claim フェーズに停止し、humanClaim(ron) で和了", () => {
     const game = riggedGame({
       east: "555z234m67m234p55s1z", // 末尾 1z が初ツモ (捨て牌用)。5m/8m 待ち
-      south: "8m999m1p1p2p2p3p3p4s4s5z", // 先頭 8m を必ず打牌する
+      // south は深いシャンテンの捨て駒手 (CPU リーチを誘発しない)。9m をツモり先頭 8m を打牌
+      south: "8m1p4p7p1s4s7s1z2z3z4z5z6z",
+      wallHead: "9m",
     });
     game.humanDiscard(13); // 1z を捨てる → south が 8m を打牌 → claim
     expect(game.state.phase).toBe("claim");
@@ -617,7 +620,9 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
   // 同じ仕込み壁が再配牌されても東2の CPU 親が即ツモすることはない
   const RON_RIG: RiggedDeal = {
     east: "555z234m67m234p55s1z", // 末尾 1z が初ツモ。5m/8m 待ち (kiro)
-    south: "8m999m1p1p2p2p3p3p4s4s5z", // 先頭 8m を打牌 → 人間がロン
+    // south は深いシャンテンの捨て駒手 (CPU リーチを誘発しない)。9m をツモり先頭 8m を打牌
+    south: "8m1p4p7p1s4s7s1z2z3z4z5z6z",
+    wallHead: "9m",
   };
 
   function winRound1(game: GameController): void {
@@ -630,7 +635,6 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
     const game = riggedGame(RON_RIG);
     winRound1(game);
     const eastScoreAfterWin = game.state.players.east.score;
-    const southScoreAfterWin = game.state.players.south.score;
 
     game.startNextRound();
     const s = game.state;
@@ -642,15 +646,14 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
     expect(s.players.west.seatWind).toBe("2z");
     expect(s.players.north.seatWind).toBe("3z");
     expect(s.players.east.seatWind).toBe("4z");
-    // 点数は引き継がれる (連荘なしでも精算結果は保持)
+    // 点数は引き継がれる (連荘なしでも精算結果は保持)。east は東2の自動進行中に放銃していない
+    // (loop は CPU の手番のみ消化するため) ので和了後の値のまま。south は CPU リーチ→和了し得るので不問。
     expect(s.players.east.score).toBe(eastScoreAfterWin);
-    expect(s.players.south.score).toBe(southScoreAfterWin);
-    expect(totalScore(game)).toBe(TOTAL_SCORE);
-    // 親 (CPU) は自動進行し、人間の番か claim で停止している
-    expect(["discard", "claim"]).toContain(s.phase);
-    if (s.phase === "discard") expect(s.turn).toBe("east");
-    // CPU 親も配牌14枚から1枚打牌している
-    expect(s.players.south.discards.length).toBeGreaterThanOrEqual(1);
+    // 供託 (CPU リーチ棒) を含めた不変条件: Σ score + riichiPot === 100000 (D-013)。
+    // CPU 親 (south) がリーチして即和了し東2が即決することもあるが、不変条件は常に保たれる。
+    expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
+    // east は東2でまだ着手していない (自動進行は人間の手番 or 終局/和了で停止)
+    expect(s.players.east.discards).toHaveLength(0);
   });
 
   it("流局でも親は交代する (連荘なし)", () => {
@@ -695,5 +698,225 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
     game.startNextRound();
     expect(game.state.roundIndex).toBe(0);
     expect(game.state.phase).toBe("discard");
+  });
+});
+
+describe("GameController / リーチ (人間)", () => {
+  // east: 1z 切りリーチで 5m/8m 待ち (kiro)。CPU 3家は散らばった深いシャンテンの捨て駒手
+  // (リーチを誘発せず、5m/8m を打たない)。wallHead で CPU は 7z をツモ、east は 8m を和了。
+  // deadWall: 表示牌1枚目(index0)=3z→ドラ4z(手に無し=表ドラ0)、裏(index5)=4s→裏ドラ5s×2。
+  const RIICHI_RIG: RiggedDeal = {
+    east: "555z234m67m234p55s1z",
+    south: "1m4m7m1p4p7p1s4s7s1z2z3z4z",
+    west: "2m9m3p6p9p2s5s8s9s1z2z4z6z",
+    north: "3m6m9m2p5p8p3s6s9s1z3z4z6z",
+    wallHead: "7z7z7z8m",
+    deadWall: "3z9m9p9s5z4s",
+  };
+
+  it("ツモ直後にリーチ候補が算出される (1z 切りのみテンパイ維持)", () => {
+    const game = riggedGame(RIICHI_RIG);
+    expect(game.state.riichiCandidates).toEqual([13]);
+  });
+
+  it("非候補 index への humanRiichiDiscard は失敗する", () => {
+    const game = riggedGame(RIICHI_RIG);
+    const result = game.humanRiichiDiscard(0);
+    expect(result.success).toBe(false);
+    expect(game.state.players.east.isRiichi).toBe(false);
+  });
+
+  it("humanRiichiDiscard(13) 成立: −1000・供託1000・横向き位置・不変条件", () => {
+    const game = riggedGame(RIICHI_RIG);
+    const result = game.humanRiichiDiscard(13);
+    expect(result.success).toBe(true);
+    const s = game.state;
+    // ループは east の canTsumo (8m ツモ) 停止まで自動進行する
+    expect(s.players.east.isRiichi).toBe(true);
+    expect(s.players.east.score).toBe(24000);
+    expect(s.riichiPot).toBe(1000);
+    expect(s.players.east.riichiDiscardIndex).toBe(0); // 河の先頭 (1z) が横向き
+    expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
+    expect(s.turn).toBe("east");
+    expect(s.canTsumo).toBe(true);
+  });
+
+  it("リーチ成立後は再宣言不可 (riichiCandidates が空)", () => {
+    const game = riggedGame(RIICHI_RIG);
+    game.humanRiichiDiscard(13);
+    expect(game.state.players.east.isRiichi).toBe(true);
+    expect(game.state.riichiCandidates).toEqual([]);
+  });
+
+  it("非門前 (ポン後) はリーチ宣言できない (candidates が空)", () => {
+    // east は 1m 対子。south の 1m をポンすると非門前 → riichiCandidates は空
+    const game = riggedGame({
+      east: "1m1m2p3p4p2s3s4s9p9p1z1z2z9s",
+      south: "1m345m345p678s4z4z4z",
+    });
+    game.humanDiscard(13); // 9s → south 1m → claim
+    expect(game.humanClaim({ kind: "pon" }).success).toBe(true);
+    expect(game.state.riichiCandidates).toEqual([]);
+  });
+
+  it("リーチ後はロック (自動ツモ切り) され、selfKanOptions は常に空", () => {
+    // east に 9s×4 を仕込み、リーチ後もカン候補が出ないことを確認するためのリグ。
+    // 1z 切りで 5m/8m 待ちを保つ形に 9s×4 はないので、別途カン抑止だけ確認する。
+    const game = riggedGame(RIICHI_RIG);
+    game.humanRiichiDiscard(13);
+    // canTsumo 停止中だが、リーチ中は暗槓候補を出さない
+    expect(game.state.selfKanOptions).toEqual([]);
+    // ツモ牌 (末尾 8m) 以外の打牌は拒否、ツモ牌の打牌は受理 (ツモ拒否)
+    const east = game.state.players.east;
+    const tsumoIdx = east.hand.length - 1;
+    expect(game.humanDiscard(0).success).toBe(false);
+    const discardsBefore = east.discards.length;
+    expect(game.humanDiscard(tsumoIdx).success).toBe(true);
+    // ツモ拒否で 8m を捨てた → 以後 8m はフリテン履歴に入る
+    expect(game.state.players.east.discardedIds).toContain("8m");
+    expect(game.state.players.east.discards.length).toBe(discardsBefore + 1);
+  });
+
+  it("一発ツモ: riichi/ippatsu/menzen-tsumo/kiro + 裏ドラ + 供託獲得", () => {
+    const game = riggedGame(RIICHI_RIG);
+    game.humanRiichiDiscard(13);
+    expect(game.state.canTsumo).toBe(true);
+    const result = game.humanDeclareTsumo();
+    expect(result.success).toBe(true);
+    const info = game.state.winInfo!;
+    const ids = info.yakus.map((y) => y.id);
+    expect(ids).toContain("riichi");
+    expect(ids).toContain("ippatsu");
+    expect(ids).toContain("menzen-tsumo");
+    expect(ids).toContain("kiro");
+    // 裏ドラ: テスト内で期待値を計算 (表ドラと同じ全牌リスト)
+    const allIds = [
+      ...info.hand,
+      ...info.melds.flatMap((m) => m.tiles),
+    ].map((t) => t.id);
+    const uraInd = uraDoraIndicators(game.state.deadWall, game.state.doraIndicatorCount);
+    const expectedUra = countDoraHan(allIds, uraInd.map((t) => t.id));
+    expect(expectedUra).toBeGreaterThan(0); // リグ上 裏ドラ 5s×2 を保証
+    expect(info.yakus.find((y) => y.id === "ura-dora")?.han).toBe(expectedUra);
+    expect(info.uraIndicators).not.toBeNull();
+    expect(info.riichiPotWon).toBe(1000);
+    expect(game.state.riichiPot).toBe(0);
+    expect(totalScore(game)).toBe(TOTAL_SCORE); // 供託回収後は完全保存
+    expect(info.totalHan).toBe(info.yakus.reduce((sum, y) => sum + y.han, 0));
+  });
+});
+
+describe("GameController / リーチ (一発の消滅・宣言牌ロン)", () => {
+  it("宣言牌が即ロンされたらリーチ不成立 (供託0・isRiichi=false)", () => {
+    // east は 8m 切りでもテンパイを保つ形。south は 5m/8m 待ち (kiro) で 8m を即ロン。
+    const game = riggedGame({
+      east: "555z234m67m234p55s8m", // 末尾 8m が初ツモ。8m 切りリーチが候補
+      south: "666z234m67m234p55s", // 5m/8m 待ち (Cost Explorer 刻子)
+    });
+    // 8m の index を特定 (末尾)
+    const idx = game.state.players.east.hand.length - 1;
+    expect(game.state.riichiCandidates).toContain(idx);
+    const result = game.humanRiichiDiscard(idx); // 8m 宣言打牌 → south 即ロン
+    expect(result.success).toBe(true);
+    const s = game.state;
+    expect(s.phase).toBe("win");
+    expect(s.winInfo?.winner).toBe("south");
+    expect(s.players.east.isRiichi).toBe(false); // リーチ不成立
+    expect(s.riichiPot).toBe(0); // 棒は出ない
+    expect(totalScore(game)).toBe(TOTAL_SCORE);
+  });
+});
+
+describe("GameController / リーチ (AWS役ゲート)", () => {
+  it("リーチのみでは和了できない: 和了牌をツモっても canTsumo=false で自動ツモ切り", () => {
+    // east は AWS役のないテンパイ: 1z(東)刻子 + 順子で 5s 単騎待ち。
+    // 1z は東場・東家で場風+自風 (標準2飜) だが AWS役ではないため、和了牌をツモっても和了不可。
+    const game = riggedGame({
+      east: "111z234m567m234p5s9p", // 末尾 9p が初ツモ。9p 切りで 5s 単騎テンパイ
+      wallHead: "9m9m9m5s", // CPU は 9m をツモ、east の次ツモ = 5s (和了牌だが AWS役なし)
+    });
+    const idx = game.state.players.east.hand.length - 1; // 9p
+    expect(game.state.riichiCandidates).toContain(idx);
+    game.humanRiichiDiscard(idx); // 9p 宣言打牌 → 5s 単騎リーチ
+    const s = game.state;
+    // リーチ後、和了牌 5s をツモっても canTsumo は false (AWS役ゲート) → 自動ツモ切りで和了しない
+    expect(s.phase).not.toBe("win");
+    expect(s.players.east.isRiichi).toBe(true);
+    // 和了牌 5s が河に積まれている (ツモ和了せず切った)
+    expect(s.players.east.discardedIds).toContain("5s");
+  });
+});
+
+describe("GameController / CPU リーチ", () => {
+  it("CPU (south) がテンパイで自動リーチする: −1000・供託1000・横向き・以後ツモ切り", () => {
+    // south に 5m/8m 待ち (kiro) テンパイを仕込む。east は安全牌を打牌。south は 9p をツモり宣言。
+    const game = riggedGame({
+      east: "1p4p7p1s4s7s9s2z3z4z5z6z7z9m", // 親14枚。先頭(1p)は安全 (south は 5m/8m 待ち)
+      south: "555z234m67m234p55s", // 5m/8m 待ち (Kiro)
+      west: "1m4m7m1p4p7p1s4s7s2z3z4z6z", // 散らばった捨て駒手 (リーチ誘発しない)
+      north: "2m9m3p6p9p2s5s8s9s2z4z6z7z",
+      wallHead: "9p9p9p", // south は 9p をツモ → 和了牌でないのでリーチ宣言
+    });
+    game.humanDiscard(0); // east 安全打牌 → south がリーチ宣言 → west/north → east に戻る
+    const s = game.state;
+    expect(s.players.south.isRiichi).toBe(true);
+    expect(s.players.south.score).toBe(24000);
+    expect(s.riichiPot).toBe(1000);
+    expect(s.players.south.riichiDiscardIndex).toBe(0); // 初打牌が横向き
+    expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
+    // south の手牌構成 (純手牌の id 集合) はリーチ後ツモ切りで変わらない
+    const handIds = s.players.south.hand.map((t) => t.id).sort();
+    expect(handIds).toEqual(mpszToTiles("555z234m67m234p55s").sort());
+  });
+
+  it("リーチフリテン: 待ち牌の見逃しで permanentFuriten、以後同じ牌でロン窓が開かない", () => {
+    // east リーチ (Kiro 5m/8m 待ち)。south は深いシャンテンで 8m を連続ツモ切り。
+    const game = riggedGame({
+      east: "555z234m67m234p55s1z", // 1z 切りリーチで 5m/8m 待ち (kiro)
+      south: "8m8m1p4p7p3p1s4s7s9s2z4z6z", // 先頭 8m を打牌 (8m×2、深いシャンテン)
+      wallHead: "9m9p9s9m9p", // south=9m→8m打, west=9p, north=9s, east=9m(非和了牌), south=9p→8m打
+    });
+    game.humanRiichiDiscard(13); // east リーチ宣言 → south が 8m 打牌 → east ロン窓
+    let s = game.state;
+    expect(s.phase).toBe("claim");
+    expect(s.claim?.tile.id).toBe("8m");
+    // 初回の待ち牌は本人がロン可能 (適格性は furiten セット前で判定)
+    expect(s.claim?.offers.ron).toBe(true);
+    // ただし eager set により、この時点で既にフリテンが立っている
+    expect(s.players.east.permanentFuriten).toBe(true);
+
+    game.humanSkipClaim(); // ロンを見送る
+    s = game.state;
+    expect(s.players.east.permanentFuriten).toBe(true);
+    // 見送り後はループが進み、south が再度 8m を打っても permanentFuriten でロン窓が開かない
+    expect(s.phase).not.toBe("claim");
+    // south は 8m を2回河に置いた (どちらもロンされず残る) ことを確認
+    const south8m = s.players.south.discards.filter((t) => t.id === "8m").length;
+    expect(south8m).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("GameController / 供託の持ち越しと残置", () => {
+  it("リーチ後に流局すると供託が残り、次局へ持ち越される (不変条件維持)", () => {
+    // east は AWS役のないテンパイ (1z刻子 + 5s単騎)。リーチしても和了できず流局まで進む。
+    const game = riggedGame({
+      east: "111z234m567m234p5s9p",
+      south: "1m4m7m1p4p7p1s4s7s2z3z4z6z",
+      west: "2m9m3p6p9p2s5s8s9s2z4z6z7z",
+      north: "3m6m9m2p5p8p3s6s9s1z3z4z6z",
+    });
+    const idx = game.state.players.east.hand.length - 1; // 9p
+    expect(game.state.riichiCandidates).toContain(idx);
+    game.humanRiichiDiscard(idx); // 5s 単騎リーチ (AWS役なし → 和了不可)
+    playRoundToEnd(game);
+    expect(game.state.phase).toBe("draw_game");
+    expect(game.state.riichiPot).toBe(1000);
+    expect(totalScore(game)).toBe(99000); // east が 1000 供託に出した
+    expect(totalScore(game) + game.state.riichiPot).toBe(TOTAL_SCORE);
+
+    game.startNextRound();
+    // 次局へ供託が持ち越される (CPU 親が追いリーチし得るため ≥1000 で断言)
+    expect(game.state.riichiPot).toBeGreaterThanOrEqual(1000);
+    expect(totalScore(game) + game.state.riichiPot).toBe(TOTAL_SCORE);
   });
 });
