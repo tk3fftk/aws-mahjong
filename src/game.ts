@@ -23,7 +23,7 @@ import {
 import { canWin } from "./winning/check";
 import { effectiveHandTiles, isMenzenHand } from "./winning/melds";
 import { judgeYaku, canDeclareWin } from "./yaku/judge";
-import { decideCpuAction, decideClaim } from "./cpu";
+import { decideCpuAction, decideClaim, PERSONALITIES, type PersonalityId } from "./cpu";
 import { CLAIM_PRIORITY, computeEligibility, resolveClaims, seatDistance } from "./claims";
 import { calcScore, type ScorePayments } from "./score";
 import { countDoraHan, doraIndicators, uraDoraIndicators, MAX_DORA_INDICATORS } from "./dora";
@@ -51,7 +51,22 @@ export interface GameControllerOptions {
   wallFactory?: (rng: RNG) => Tile[];
   /** テスト用シーム: CPU打牌選択の乱数を差し替える。省略時は seed 由来 */
   rng?: RNG;
+  /**
+   * true なら CPU を旧来の単一ロジック (balanced 相当の鳴き + ランダム打牌 + 守備なし) に固定する。
+   * debug の仕込みシナリオ / 決定的テストで進行を再現可能にするため。省略時 (通常プレイ) は
+   * 席ごとの三者三様の性格 (CPU_PERSONALITY) が有効になる。
+   */
+  legacyCpu?: boolean;
 }
+
+// 通常プレイでの席ごとの性格 (east は人間なので未使用)。
+// south=攻撃(Lambda) / west=守備(Well-Architected) / north=均衡(Auto Scaling)
+const CPU_PERSONALITY: Record<Seat, PersonalityId> = {
+  east: "balanced",
+  south: "attacker",
+  west: "defender",
+  north: "balanced",
+};
 
 export interface ActionAttempt {
   success: boolean;
@@ -82,6 +97,7 @@ export class GameController {
   #rng: RNG;
   #onChange: (state: GameState) => void;
   #wallFactory: (rng: RNG) => Tile[];
+  #legacyCpu: boolean;
   // リーチ宣言打牌中の席。打牌がロンされなかった時点で成立 (#commitRiichi)。
   // GameState には置かず controller 私有で管理する (D-013)
   #pendingRiichi: Seat | null = null;
@@ -90,6 +106,7 @@ export class GameController {
     this.#rng = opts.rng ?? mulberry32(opts.seed ?? Date.now());
     this.#onChange = opts.onChange ?? (() => {});
     this.#wallFactory = opts.wallFactory ?? buildWall;
+    this.#legacyCpu = opts.legacyCpu ?? false;
     this.#state = createInitialState();
   }
 
@@ -328,11 +345,30 @@ export class GameController {
     throw new Error("game loop did not settle");
   }
 
+  /**
+   * seat から見た他家のリーチ状況と現物。safeTileIds は全リーチ者の捨て牌 (discardedIds) の
+   * 積集合 = どのリーチに対しても 100%安全な現物。複数リーチで空になり得る (守備側は孤立牌で代替)。
+   */
+  #opponentRiichiContext(seat: Seat): { anyOpponentRiichi: boolean; safeTileIds: TileId[] } {
+    const riichiSeats = SEAT_ORDER.filter((s) => s !== seat && this.#state.players[s].isRiichi);
+    if (riichiSeats.length === 0) return { anyOpponentRiichi: false, safeTileIds: [] };
+    let safe = new Set<TileId>(this.#state.players[riichiSeats[0]!].discardedIds);
+    for (const s of riichiSeats.slice(1)) {
+      const ids = new Set(this.#state.players[s].discardedIds);
+      safe = new Set([...safe].filter((id) => ids.has(id)));
+    }
+    return { anyOpponentRiichi: true, safeTileIds: [...safe] };
+  }
+
   /** CPU の1手番: ツモ和了 / 暗槓 / 打牌のいずれか1アクション (この優先順) */
   #cpuTurnStep(): void {
     const seat = this.#state.turn;
     const player = this.#state.players[seat];
     const drewThisTurn = this.#state.lastDrawTile !== null;
+    const personality = this.#legacyCpu ? PERSONALITIES.balanced : PERSONALITIES[CPU_PERSONALITY[seat]];
+    // 守備用文脈: 他家のリーチ状況と現物 (全リーチ者の捨て牌の積集合 = 100%安全)。
+    // legacy では守備しないので計算しない
+    const defense = this.#legacyCpu ? null : this.#opponentRiichiContext(seat);
     const action = decideCpuAction({
       hand: player.hand,
       melds: player.melds,
@@ -343,9 +379,13 @@ export class GameController {
         roundWind: this.#state.roundWind,
         isRiichi: player.isRiichi,
         winningTileId: this.#state.lastDrawTile?.id ?? null,
+        anyOpponentRiichi: defense?.anyOpponentRiichi ?? false,
+        safeTileIds: defense?.safeTileIds ?? [],
       },
       riichiAllowed: this.#riichiPreconditionsMet(seat),
       rng: this.#rng,
+      personality,
+      randomDiscard: this.#legacyCpu,
     });
     if (action.action === "win" && drewThisTurn) {
       const result = this.#tryWin(seat, { isTsumo: true });
@@ -427,9 +467,21 @@ export class GameController {
     }
     const cpuClaims: CpuClaim[] = [];
     for (const [seat, offers] of offersBySeat) {
-      if (this.#state.players[seat].isHuman) continue;
-      const kind = decideClaim({ offers, tile });
-      if (kind) cpuClaims.push({ seat, kind });
+      const p = this.#state.players[seat];
+      if (p.isHuman) continue;
+      const kind = this.#legacyCpu
+        ? decideClaim({ offers, tile }) // 旧来: ロン / 役牌ポンのみ
+        : decideClaim({
+            offers,
+            tile,
+            personality: PERSONALITIES[CPU_PERSONALITY[seat]],
+            hand: p.hand,
+            melds: p.melds,
+            seatWind: p.seatWind,
+            roundWind: this.#state.roundWind,
+          });
+      if (kind === "chi") cpuClaims.push({ seat, kind, chiTiles: offers.chi[0]!.tiles });
+      else if (kind) cpuClaims.push({ seat, kind });
     }
     const cpuBest = resolveClaims(cpuClaims, discarder, SEAT_ORDER);
 

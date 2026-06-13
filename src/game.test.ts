@@ -13,11 +13,16 @@ function totalScore(game: GameController): number {
   return ALL_SEATS.reduce((sum, s) => sum + game.state.players[s].score, 0);
 }
 
-/** 仕込み壁 + CPUは常に先頭牌を打牌する固定rng のコントローラ */
-function riggedGame(spec: RiggedDeal): GameController {
+/**
+ * 仕込み壁 + CPUは常に先頭牌を打牌する固定rng のコントローラ。
+ * legacyCpu=true で CPU を旧来の単一ロジック (鳴き=ロン/役牌ポン・ランダム打牌・守備なし) に固定し、
+ * 仕込みシナリオを決定的に進める。性格を効かせた統合テストは riggedGame(spec, false) を使う。
+ */
+function riggedGame(spec: RiggedDeal, legacyCpu = true): GameController {
   const game = new GameController({
     wallFactory: () => riggedDeal(spec),
     rng: () => 0,
+    legacyCpu,
   });
   game.startMatch();
   return game;
@@ -380,6 +385,49 @@ describe("GameController / ポン・チー", () => {
   });
 });
 
+describe("GameController / CPU 性格 (通常プレイ・三者三様)", () => {
+  // legacyCpu=false で席ごとの性格を有効にし、配線 (席→性格・hand文脈・チー牌組) を検証する。
+  // 性格ロジック自体の網羅は cpu.test.ts。ここでは game.ts が正しく性格を引き回すことを確認する。
+
+  it("west(Well-Architected) は legacy では役牌をポンするが、性格モードでは一切鳴かない", () => {
+    const spec: RiggedDeal = {
+      east: "7z234m567m234p55s99s", // 7z (孤立字牌) を切る
+      west: "147m147p147s7z7z2z3z", // 7z 対子持ち・バラバラでテンパイではない (ロンしない)
+    };
+    const discard7z = (g: GameController) =>
+      g.humanDiscard(g.state.players.east.hand.findIndex((t) => t.id === "7z"));
+
+    const legacy = riggedGame(spec, true);
+    discard7z(legacy);
+    expect(legacy.state.players.west.melds.some((m) => m.kind === "pon")).toBe(true);
+
+    const persona = riggedGame(spec, false);
+    discard7z(persona);
+    expect(persona.state.players.west.melds).toHaveLength(0);
+  });
+
+  it("south(Lambda) は AWS役 (789p) が残るチーを鳴く (legacy では鳴かない)", () => {
+    const spec: RiggedDeal = {
+      east: "9p234m567m234s55s22z", // 9p を切る (south がチー可能)
+      south: "234m567m34s55s1z7p8p", // 7p8p で 789p チー → cicd-pipeline 確定
+      west: "147m147p147s1z2z3z4z", // 9p を鳴けない孤立手
+      north: "369m369p369s1z2z3z4z",
+    };
+    const discard9p = (g: GameController) =>
+      g.humanDiscard(g.state.players.east.hand.findIndex((t) => t.id === "9p"));
+
+    const legacy = riggedGame(spec, true);
+    discard9p(legacy);
+    expect(legacy.state.players.south.melds.some((m) => m.kind === "chi")).toBe(false);
+
+    const persona = riggedGame(spec, false);
+    discard9p(persona);
+    const chi = persona.state.players.south.melds.find((m) => m.kind === "chi");
+    expect(chi).toBeDefined();
+    expect(chi!.tiles.map((t) => t.id).sort()).toEqual(["7p", "8p", "9p"]);
+  });
+});
+
 describe("GameController / CPU の優先順位", () => {
   it("CPU はツモ和了できるとき暗槓より和了を優先する", () => {
     const game = riggedGame({
@@ -620,7 +668,8 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
       game.startNextRound();
     }
     expect(game.state.phase).toBe("round_end");
-    expect(totalScore(game)).toBe(TOTAL_SCORE);
+    // 終局時の点数保存則: 未回収のリーチ棒 (供託) が残り得るため riichiPot を含めて 10万点
+    expect(totalScore(game) + game.state.riichiPot).toBe(TOTAL_SCORE);
   });
 
   it("終局から startMatch でやり直すと 25000点×4・東1局に戻る", () => {

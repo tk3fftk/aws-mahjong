@@ -5,9 +5,11 @@ import { DEBUG_PRESETS } from "./presets";
 import { debugPanelHtml, rigFormHtml } from "./panel";
 
 function presetGame(name: string): GameController {
+  // main.ts の debug 仕込みと同条件: CPU を旧来の決定的ロジックに固定する
   const game = new GameController({
     wallFactory: () => riggedDeal(DEBUG_PRESETS[name]!),
     rng: () => 0,
+    legacyCpu: true,
   });
   game.startMatch();
   return game;

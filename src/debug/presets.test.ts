@@ -5,9 +5,11 @@ import { DEBUG_PRESETS } from "./presets";
 
 /** プリセットを debug mode と同じ条件 (仕込み壁 + CPU 先頭打牌固定) で起こす */
 function presetGame(spec: RiggedDeal): GameController {
+  // main.ts の debug 仕込みと同条件: CPU を旧来の決定的ロジックに固定する
   const game = new GameController({
     wallFactory: () => riggedDeal(spec),
     rng: () => 0,
+    legacyCpu: true,
   });
   game.startMatch();
   return game;

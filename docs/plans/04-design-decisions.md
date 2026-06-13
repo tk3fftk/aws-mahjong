@@ -221,3 +221,21 @@
   - `ScoreInput.fu` が必須に。`WinInfo.fu` 追加、和了パネルは「N符 M飜」表示 (役満は符非表示)
   - 適格性パス (`winningTileId: null`) では平和が待ち形不問になる軽微な飜数不整合があるが、ゲートは AWS役の有無のみ見るため和了可否に影響しない
   - `cpu.test.ts`/`judge.test.ts` 等の ctx リテラルに `winningTileId`/`melds` が必要になった (既存挙動は null/[] で不変)
+
+## D-015: CPU の三者三様の性格付け
+
+- **What**: 全 CPU が同一ロジックだった `cpu.ts` を、席ごとに異なる性格で打つよう拡張 (2026-06)。設計の要点:
+  - **性格は純データ record の knob**: `CpuPersonality` (`foldToGenbutsu` / `foldOnlyWhenNotTenpai` / `allowPon` / `ponDragonOnly` / `allowChi` / `allowKanOnDragon` / `suppressRiichiVsOpponentRiichi`) を `PERSONALITIES: Record<PersonalityId, CpuPersonality>` で定義。`decideCpuAction`/`decideClaim` は単一の純分岐関数のまま knob を読むだけで、分岐コードを席ごとに散らさない
+  - **席割り** (`game.ts:CPU_PERSONALITY`): south=`attacker`(Lambda) / west=`defender`(Well-Architected) / north=`balanced`(Auto Scaling)。3者の差は**鳴き・守備・リーチ**の軸に出る (打牌ベースラインは共通)
+    - attacker: 押し続ける / 勝てる鳴き (`keepsAwsWinPath` ゲート通過) は積極 / 即リーチ / 降りない
+    - defender: 一切鳴かず門前維持 / 相手リーチで現物ベタオリ / 相手リーチ中は自分のリーチを抑止
+    - balanced: 役牌ポンのみ (現状踏襲) / 非テンパイ時だけ降りる / テンパイなら押す
+  - **`pickIsolatedDiscard`** (3者共通ベースライン): 向聴計算が無いため、`counts34` で各牌の ±2 近傍＋余剰コピーの「支持度」を測り最も孤立した牌を切る (么九バイアス + rng タイブレーク)。純ランダムより常に良い。守備の `pickGenbutsuDiscard` (現物優先・rng不要) と対。
+  - **`keepsAwsWinPath` 自己ゲート**: 鳴き過ぎて AWS役ゲート (D-009 項5) を満たせず和了不能になる「死に手」を防ぐ。役牌ポン/カンは hanOpen≥1 で常に許可、それ以外 (チー/非役牌ポン) は鳴き後テンパイの待ちのいずれかが `canDeclareWin` を満たすときだけ許可。AWS役は散らばり単牌の組合せ (例 `3p2m7s9s`=web-application-kan) も一致するため、これで実際に和了できる鳴きだけを選ぶ
+  - **現物 (`safeTileIds`)**: `game.ts:#opponentRiichiContext` がリーチ済み他家全員の `discardedIds` の**積集合** (=どのリーチにも 100%安全) を算出して `CpuContext` に渡す。複数リーチで空になり得る場合は守備側が孤立牌で代替
+- **Why**: 3人の打ち筋に個性がなく対局の手応えに乏しかった。三者三様の打ち筋で対局を面白くする (ユーザー要望)。差別化は観測しやすい鳴き/守備/リーチに置き、向聴・危険牌評価という未実装の重い計算は避けた
+- **Consequences**:
+  - **debug 仕込み (`?debug=...`) と決定的テストは `legacyCpu` で旧来の単一ロジック (balanced 鳴き + ランダム打牌 + 守備なし) に固定**。`pickIsolatedDiscard` と性格鳴きで「CPUは常に先頭牌を打牌」前提のプリセット・統合テストが崩れるのを避け、シナリオを再現可能に保つ。`main.ts` は rig 有り (`?debug=ron` 等) で `legacyCpu:true`、通常プレイ・パネルのみ (`?debug=1`) で性格 ON。`game.test.ts:riggedGame(spec, legacyCpu=true)` 既定
+  - `CpuInput`/`CpuContext`/`ClaimDecisionInput` を additive 拡張 (`personality?`/`randomDiscard?`/`anyOpponentRiichi?`/`safeTileIds?`/`hand?`/`melds?`/`seatWind?`/`roundWind?`)。省略時は balanced・自己ゲート省略で旧挙動と不変
+  - 守備の「現物が無い」フォールバックは最も孤立した么九牌で代替 = **100%安全ではない** (字牌の単騎/シャンポンに刺さり得る)。危険牌モデルが無い以上の最善
+  - 性格ロジックは `cpu.test.ts` で網羅、`game.ts` 配線は `game.test.ts` の性格モード統合2件で検証
