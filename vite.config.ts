@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  base: "/aws-mahjong/app/",
+  base: "/aws-mahjong/",
   build: {
     outDir: "docs/app",
     emptyOutDir: true,
