@@ -3,6 +3,8 @@
 AWS麻雀 — 牌が AWS サービス、役に AWS固有役 (22役) がある4人対戦麻雀 (人間 vs CPU×3)。
 Vite + TypeScript + 素のDOM。設計・実装方針は [`docs/plans/`](./docs/plans/) を参照。
 
+「AWS麻雀」のコンセプト・出典: [mu7889yoon.github.io/aws-mahjong/v2.0.1/](https://mu7889yoon.github.io/aws-mahjong/v2.0.1/) (version 2.0.1 に準拠)
+
 ## 開発コマンド
 
 ```sh
