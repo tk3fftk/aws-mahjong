@@ -239,3 +239,16 @@
   - `CpuInput`/`CpuContext`/`ClaimDecisionInput` を additive 拡張 (`personality?`/`randomDiscard?`/`anyOpponentRiichi?`/`safeTileIds?`/`hand?`/`melds?`/`seatWind?`/`roundWind?`)。省略時は balanced・自己ゲート省略で旧挙動と不変
   - 守備の「現物が無い」フォールバックは最も孤立した么九牌で代替 = **100%安全ではない** (字牌の単騎/シャンポンに刺さり得る)。危険牌モデルが無い以上の最善
   - 性格ロジックは `cpu.test.ts` で網羅、`game.ts` 配線は `game.test.ts` の性格モード統合2件で検証
+
+## D-016: グローバルエラー捕捉とフォールバックDOM (盤面フリーズの受け皿)
+
+- **What**: 想定外例外で盤面が無反応に固まる唯一の本番障害モードに受け皿を用意 (2026-06、PR #2 レビュー Critical #3 対応)。設計の要点:
+  - **グローバル捕捉1本**: `main.ts` で `window` の `error`/`unhandledrejection` を購読し `reportFatal()` へ集約。打牌などハンドラ層 (`onTileClick` 等) の同期例外も**未捕捉なら window の error イベントに伝播する**ため、per-handler の try/catch を散らさずグローバル1本でカバーする
+  - **フォールバックで盤面固定**: `reportFatal` は `render.ts:renderFatal()` で `#app` を差し替え (`showToast` 同様 `createElement`+`textContent`、innerHTML 不使用)、見出し+`seed`+リロードボタンを描画。`fatalShown` フラグで多重描画と、`rerender()` 先頭ガードで onChange 由来の盤面復活を防ぎ、壊れた状態の操作続行を断つ
+  - **障害文言は実際の障害パターンで2分**: 実行時例外 (ハンドラ/async) =「AZ障害が発生しました」、起動失敗 (配牌仕込み失敗 → rig を捨てた通常ゲームでの再試行 `startMatch()` も失敗) =「リージョン障害が発生しました」。後者は `main.ts:102-` の再試行を try/catch で包んで初めて捕捉でき、これが無いと catch 外で `#app` 空=白画面に固まる二次フリーズだった
+  - **seed 再現性** (同レビュー Warning #3): `seed = Date.now()` のため不具合局面が再現できなかった。起動時に `console.info(seed)` を必ず1回出し、全エラートースト (debug parse 失敗 / `orToast` / 配牌仕込み失敗 / リーチ拒否) に `(seed=...)` を付与。URL `?seed=<値>` で当該局を再現できる
+- **Why**: 完全クライアントサイドのため最後の砦の `throw` (`#loop` の "game loop did not settle" 等) が UI 層で握られず、復旧はリロードのみ・手段の提示もなかった。盤面フリーズと白画面に最低限の受け皿と再現性を与える
+- **Consequences**:
+  - ロジック無改修 (`game.ts`/`cpu.ts`/`winning/*` 不変) のため既存テストは緑のまま。本変更は DOM/起動レベルで vitest の `node` 環境 (jsdom なし) では自動テスト対象外 → CLAUDE.md どおり人間がブラウザ確認
+  - 動作確認は DevTools コンソールから例外注入で行う: `window.dispatchEvent(new ErrorEvent("error", { error: new Error("test") }))` / `Promise.reject(new Error("test"))` → フォールバック描画。**AZ障害パターンは 2026-06 人間がブラウザで確認済み**。リージョン障害は起動不能時のみで通常踏まないが描画経路は同じ `renderFatal`
+  - `#app` 不在 (`main.ts:9` の throw) と `parseDebugConfig` の既存 try/catch は対象外 (前者は復旧不能、後者は専用 catch 済み)

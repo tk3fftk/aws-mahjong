@@ -37,7 +37,7 @@ ui/render ──────────────┐
 
 | ファイル | 一行責務 |
 |---|---|
-| `src/main.ts` | エントリ。`GameController` を起動し、状態変化のたびに `render()` を呼ぶ。手牌選択 (`UiState.selectedHandIndex`) などゲーム状態に属さないUI状態もここで管理 |
+| `src/main.ts` | エントリ。`GameController` を起動し、状態変化のたびに `render()` を呼ぶ。手牌選択 (`UiState.selectedHandIndex`) などゲーム状態に属さないUI状態もここで管理。`window` の error/unhandledrejection をグローバル捕捉し、想定外例外時は `renderFatal()` でフォールバック描画 (D-016) |
 | `src/types.ts` | 全体で共有する型定義のみ。実装ロジックは置かない |
 | `src/tiles.ts` | 牌の定義 (TileId / AWS_NAMES) と低レベルヘルパ (`tileIdIndex`, `canStartSequenceAt`, `counts34`) |
 | `src/wall.ts` | 山の生成 (`buildWall`) ・4人分の配牌 (`dealInitialHands`) ・ツモ (`drawFromWall`) ・リンシャンツモ (`drawFromWallEnd`) ・王牌分離 (`splitDeadWall`) ・PRNG (`mulberry32`) |

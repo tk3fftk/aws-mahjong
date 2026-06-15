@@ -482,6 +482,34 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
   });
 }
 
+export function renderFatal(root: HTMLElement, headline: string, seed: number): void {
+  // 想定外例外の最後の砦。innerHTML を使わず textContent で安全に組み立てる。
+  // root を差し替えて壊れた盤面の操作続行を防ぎ、リロードでの復旧を案内する。
+  root.replaceChildren();
+  const box = document.createElement("div");
+  box.className = "fatal";
+
+  const title = document.createElement("h2");
+  title.className = "fatal-title";
+  title.textContent = `🚨 ${headline}`;
+
+  const hint = document.createElement("p");
+  hint.className = "fatal-hint";
+  hint.textContent = "ページをリロードすると復旧します。";
+
+  const seedLine = document.createElement("p");
+  seedLine.className = "fatal-seed";
+  seedLine.textContent = `seed=${seed}`;
+
+  const reload = document.createElement("button");
+  reload.className = "fatal-reload";
+  reload.textContent = "リロード";
+  reload.addEventListener("click", () => location.reload());
+
+  box.append(title, hint, seedLine, reload);
+  root.appendChild(box);
+}
+
 export function showToast(message: string, durationMs = 2000): void {
   // #app は再描画のたびに innerHTML 全置換されるため、body 直下にマウントして
   // トーストが表示中に消えないようにする (yaku-help のオーバーレイと同じ理由)

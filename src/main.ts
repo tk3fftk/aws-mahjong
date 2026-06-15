@@ -1,6 +1,6 @@
 import "./ui/styles.css";
 import { GameController, type ActionAttempt } from "./game";
-import { render, showToast, type RenderHandlers, type UiState } from "./ui/render";
+import { render, renderFatal, showToast, type RenderHandlers, type UiState } from "./ui/render";
 import { parseDebugConfig, type DebugConfig } from "./debug/params";
 import { riggedDeal } from "./debug/rigged";
 import { updateDebugPanel } from "./debug/panel";
@@ -12,6 +12,21 @@ if (!root) throw new Error("#app not found");
 const rawSeed = new URLSearchParams(location.search).get("seed");
 const parsedSeed = rawSeed !== null && rawSeed !== "" ? Number(rawSeed) : NaN;
 const seed = Number.isFinite(parsedSeed) ? parsedSeed : Date.now();
+// 不具合報告から局面を再現できるよう seed を必ず1回出す (URL に ?seed=<値> で再現可能)
+console.info(`seed=${seed}`);
+
+// 想定外例外の最後の砦。ハンドラ層の同期例外 (打牌等) は未捕捉だと window の error
+// イベントに伝播するため、グローバル捕捉1本で盤面フリーズの受け皿を作る。
+// 一度発火したら #app をフォールバックに固定し、壊れた盤面の操作続行を防ぐ。
+let fatalShown = false;
+function reportFatal(headline: string, error: unknown): void {
+  console.error(`[fatal] seed=${seed}`, error);
+  if (fatalShown) return; // 多重描画ガード
+  fatalShown = true;
+  renderFatal(root!, headline, seed);
+}
+window.addEventListener("error", (e) => reportFatal("AZ障害が発生しました", e.error ?? e.message));
+window.addEventListener("unhandledrejection", (e) => reportFatal("AZ障害が発生しました", e.reason));
 
 // ?debug=1 / ?debug=riichi / ?debug=1&east=... で debug mode (docs/plans 参照)。
 // 不正なプリセット名はトーストを出して通常ゲームへフォールバックする
@@ -19,13 +34,14 @@ let debugConfig: DebugConfig | null = null;
 try {
   debugConfig = parseDebugConfig(location.search);
 } catch (e) {
-  showToast((e as Error).message, 4000);
+  showToast(`${(e as Error).message} (seed=${seed})`, 4000);
 }
 
 // 手牌の選択状態などゲーム状態に属さない一時的なUI状態。
 const ui: UiState = { selectedHandIndex: null, riichiArmed: false };
 
 function rerender(): void {
+  if (fatalShown) return; // フォールバック固定後は onChange 由来の再描画で盤面を復活させない
   render(root!, game.state, handlers, ui);
   if (debugConfig) updateDebugPanel(game.state, debugConfig);
 }
@@ -56,7 +72,7 @@ let game = createGame();
 
 function orToast(result: ActionAttempt): void {
   if (!result.success) {
-    showToast(result.reason ?? "実行できません");
+    showToast(`${result.reason ?? "実行できません"} (seed=${seed})`);
   }
 }
 
@@ -67,7 +83,7 @@ const handlers: RenderHandlers = {
       // onChange が armed 解除 & 再描画を行う。失敗時は armed を残して再描画する。
       const result = game.humanRiichiDiscard(index);
       if (!result.success) {
-        showToast(result.reason ?? "リーチできません");
+        showToast(`${result.reason ?? "リーチできません"} (seed=${seed})`);
         rerender();
       }
     } else if (ui.selectedHandIndex === index) {
@@ -104,8 +120,13 @@ try {
 } catch (e) {
   // riggedDeal の検証エラー (枚数違い・mpsz 不正・牌の使いすぎ)。
   // wallFactory は配牌のたびに呼ばれて再発するため、rig を捨てて通常ゲームで開始し直す
-  showToast(`配牌の仕込みに失敗: ${(e as Error).message}`, 5000);
+  showToast(`配牌の仕込みに失敗: ${(e as Error).message} (seed=${seed})`, 5000);
   debugConfig = debugConfig && { ...debugConfig, rig: null };
   game = createGame();
-  game.startMatch();
+  try {
+    game.startMatch();
+  } catch (e2) {
+    // 通常ゲームでの再試行も失敗 → 起動不能。白画面でなくフォールバックを描画する
+    reportFatal("リージョン障害が発生しました", e2);
+  }
 }

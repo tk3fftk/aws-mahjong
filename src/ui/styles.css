@@ -644,6 +644,41 @@ button.secondary {
   z-index: 30;
 }
 
+/* ---- 致命的エラーのフォールバック ---- */
+
+.fatal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 60vh;
+  padding: 24px;
+  text-align: center;
+}
+
+.fatal-title {
+  color: var(--danger);
+  margin: 0;
+}
+
+.fatal-hint {
+  margin: 0;
+}
+
+.fatal-seed {
+  margin: 0;
+  opacity: 0.7;
+  font-family: monospace;
+}
+
+.fatal-reload {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 /* ---- 役一覧モーダル ---- */
 
 .yaku-help-overlay {
