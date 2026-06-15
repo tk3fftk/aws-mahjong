@@ -1,46 +1,112 @@
 import type {
+  ClaimKind,
+  ClaimOffers,
+  CpuClaim,
   GameState,
   Player,
   Seat,
   SeatWind,
+  SelfKanOption,
   Tile,
-  WinInfo,
+  TileId,
 } from "./types";
 import { sortTiles } from "./tiles";
-import { buildWall, dealInitialHands, drawFromWall, mulberry32 } from "./wall";
+import {
+  buildWall,
+  dealInitialHands,
+  drawFromWall,
+  drawFromWallEnd,
+  mulberry32,
+  splitDeadWall,
+  type RNG,
+} from "./wall";
 import { canWin } from "./winning/check";
+import { effectiveHandTiles, isMenzenHand } from "./winning/melds";
 import { judgeYaku, canDeclareWin } from "./yaku/judge";
-import { decideCpuAction } from "./cpu";
-import { calcScore } from "./score";
+import { decideCpuAction, decideClaim, PERSONALITIES, type PersonalityId } from "./cpu";
+import { CLAIM_PRIORITY, computeEligibility, resolveClaims, seatDistance } from "./claims";
+import { calcScore, type ScorePayments } from "./score";
+import { countDoraHan, doraIndicators, uraDoraIndicators, MAX_DORA_INDICATORS } from "./dora";
+import { riichiDiscardIndices } from "./riichi";
+import { winningTiles } from "./winning/furiten";
 
 // 各プレイヤーの初期持ち点 (麻雀標準)
 const INITIAL_SCORE = 25000;
 
+// リーチ宣言の供託 (リーチ棒)
+const RIICHI_COST = 1000;
+
+// 反復ループの安全弁。1局は最大でも 70巡 × 数アクションで収まる
+const LOOP_GUARD = 1000;
+
+// ポン/明槓で手牌から出す枚数
+const TILES_FROM_HAND_FOR_PON = 2;
+const TILES_FROM_HAND_FOR_KAN = 3;
+const KAN_SET_SIZE = 4;
+
 export interface GameControllerOptions {
   seed?: number;
   onChange?: (state: GameState) => void;
+  /** テスト用シーム: 仕込み壁を注入する。省略時は buildWall */
+  wallFactory?: (rng: RNG) => Tile[];
+  /** テスト用シーム: CPU打牌選択の乱数を差し替える。省略時は seed 由来 */
+  rng?: RNG;
+  /**
+   * true なら CPU を旧来の単一ロジック (balanced 相当の鳴き + ランダム打牌 + 守備なし) に固定する。
+   * debug の仕込みシナリオ / 決定的テストで進行を再現可能にするため。省略時 (通常プレイ) は
+   * 席ごとの三者三様の性格 (CPU_PERSONALITY) が有効になる。
+   */
+  legacyCpu?: boolean;
 }
 
-export interface TsumoAttempt {
+// 通常プレイでの席ごとの性格 (east は人間なので未使用)。
+// south=攻撃(Lambda) / west=守備(Well-Architected) / north=均衡(Auto Scaling)
+const CPU_PERSONALITY: Record<Seat, PersonalityId> = {
+  east: "balanced",
+  south: "attacker",
+  west: "defender",
+  north: "balanced",
+};
+
+export interface ActionAttempt {
   success: boolean;
   reason?: string;
 }
 
-const SEAT_ORDER: Seat[] = ["east", "south"];
+// 後方互換のための別名 (humanDeclareTsumo の戻り値として使ってきた名前)
+export type TsumoAttempt = ActionAttempt;
 
-const SEAT_WIND: Record<Seat, SeatWind> = {
-  east: "1z",
-  south: "2z",
-};
+const SEAT_ORDER: Seat[] = ["east", "south", "west", "north"];
+
+// 東風戦の局数 (東1〜東4)。局 N の親は SEAT_ORDER[N]
+const ROUNDS_PER_MATCH = 4;
+
+// 親からのツモ順オフセット → 自風 (親=東家)
+const WINDS: SeatWind[] = ["1z", "2z", "3z", "4z"];
+
+function windFor(dealer: Seat, seat: Seat): SeatWind {
+  return WINDS[seatDistance(dealer, seat, SEAT_ORDER)]!;
+}
+
+function nextSeat(seat: Seat): Seat {
+  return SEAT_ORDER[(SEAT_ORDER.indexOf(seat) + 1) % SEAT_ORDER.length]!;
+}
 
 export class GameController {
   #state: GameState;
-  #rng: () => number;
+  #rng: RNG;
   #onChange: (state: GameState) => void;
+  #wallFactory: (rng: RNG) => Tile[];
+  #legacyCpu: boolean;
+  // リーチ宣言打牌中の席。打牌がロンされなかった時点で成立 (#commitRiichi)。
+  // GameState には置かず controller 私有で管理する (D-013)
+  #pendingRiichi: Seat | null = null;
 
   constructor(opts: GameControllerOptions = {}) {
-    this.#rng = mulberry32(opts.seed ?? Date.now());
+    this.#rng = opts.rng ?? mulberry32(opts.seed ?? Date.now());
     this.#onChange = opts.onChange ?? (() => {});
+    this.#wallFactory = opts.wallFactory ?? buildWall;
+    this.#legacyCpu = opts.legacyCpu ?? false;
     this.#state = createInitialState();
   }
 
@@ -48,38 +114,121 @@ export class GameController {
     return this.#state;
   }
 
-  startNewRound(): void {
-    const wall = buildWall(this.#rng);
-    const dealt = dealInitialHands(wall);
-    const eastInitialDraw = dealt.east[dealt.east.length - 1] ?? null;
-    const eastSortedRest = sortTiles(dealt.east.slice(0, -1));
-    const eastHand = eastInitialDraw ? [...eastSortedRest, eastInitialDraw] : eastSortedRest;
+  /** 半荘 (東風戦) を最初から始める。持ち点を 25000 にリセットして東1局を配牌 */
+  startMatch(): void {
+    for (const seat of SEAT_ORDER) {
+      this.#state.players[seat].score = INITIAL_SCORE;
+    }
+    this.#state.riichiPot = 0; // 持ち越し供託をクリアしてから配牌
+    this.#deal(0);
+  }
+
+  /**
+   * 次の局へ進む (win / draw_game からのみ有効)。
+   * AWS麻雀は「親の連荘なし」なので、親の和了・流局を問わず常に親が交代する。
+   * 東4局終了後は phase="round_end" (終局) になり、点数は動かない。
+   */
+  startNextRound(): void {
+    if (this.#state.phase !== "win" && this.#state.phase !== "draw_game") return;
+    if (this.#state.roundIndex >= ROUNDS_PER_MATCH - 1) {
+      this.#state.phase = "round_end";
+      this.#emit();
+      return;
+    }
+    this.#deal(this.#state.roundIndex + 1);
+  }
+
+  /**
+   * 局 roundIndex の配牌。親 = SEAT_ORDER[roundIndex] で、piles[0] (14枚) が親に渡り、
+   * 自風はツモ順で 1z→4z と回る。親が CPU の場合は #loop で人間の手番まで自動進行する。
+   */
+  #deal(roundIndex: number): void {
+    const dealt = dealInitialHands(this.#wallFactory(this.#rng));
+    const { liveWall, deadWall } = splitDeadWall(dealt.remainingWall);
+    const dealer = SEAT_ORDER[roundIndex % SEAT_ORDER.length]!;
+    const dealerIdx = SEAT_ORDER.indexOf(dealer);
+    // ソートで配列はコピーされるが Tile の同一性は保たれるため、先に初ツモ参照を確保する
+    const initialDraw = dealt.piles[0][dealt.piles[0].length - 1] ?? null;
+
+    const prev = this.#state.players;
+    const players = {} as Record<Seat, Player>;
+    dealt.piles.forEach((pile, offset) => {
+      const seat = SEAT_ORDER[(dealerIdx + offset) % SEAT_ORDER.length]!;
+      const isDealer = offset === 0;
+      // 親の手は「整列済み13枚 + 初ツモ(末尾)」。人間の並びは以後手動維持 (D-010)
+      const hand =
+        isDealer && initialDraw
+          ? [...sortTiles(pile.slice(0, -1)), initialDraw]
+          : sortTiles(pile);
+      players[seat] = makePlayer(seat, hand, prev[seat].score, WINDS[offset]!, isDealer);
+    });
+
     this.#state = {
-      wall: dealt.remainingWall,
-      players: {
-        east: makePlayer("east", true, eastHand, this.#state.players.east.score),
-        south: makePlayer("south", false, sortTiles(dealt.south), this.#state.players.south.score),
-      },
-      turn: "east",
+      wall: liveWall,
+      deadWall,
+      doraIndicatorCount: 1, // 配牌時に表ドラ表示牌1枚を公開
+      players,
+      turn: dealer,
       roundWind: "1z",
-      roundIndex: 0,
+      roundIndex,
       phase: "discard",
-      lastDrawTile: eastInitialDraw,
+      lastDrawTile: initialDraw,
+      lastDiscard: null,
+      claim: null,
+      selfKanOptions: [],
+      canTsumo: false,
       winInfo: null,
+      riichiPot: this.#state.riichiPot, // 流局時は供託を次局へ持ち越す
+      riichiCandidates: [],
     };
+    this.#pendingRiichi = null;
+    this.#refreshHumanTurnHints();
+    this.#loop();
     this.#emit();
   }
 
-  humanDiscard(index: number): void {
-    if (this.#state.phase !== "discard" || this.#state.turn !== "east") return;
+  // ---- 公開 API: 人間の操作 ----
+
+  humanDiscard(index: number): ActionAttempt {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
+      return { success: false, reason: "ターンが違います" };
+    }
     const east = this.#state.players.east;
-    if (index < 0 || index >= east.hand.length) return;
-    const tile = east.hand[index]!;
-    east.hand = east.hand.filter((_, i) => i !== index);
-    east.discards.push(tile);
-    this.#state.lastDrawTile = null;
-    this.#advanceTurn();
+    if (index < 0 || index >= east.hand.length) {
+      return { success: false, reason: "その牌は選べません" };
+    }
+    // リーチ中はツモ切りのみ (ツモ牌 = lastDrawTile と参照等価。D-010 と同じ規約)
+    if (east.isRiichi && east.hand[index] !== this.#state.lastDrawTile) {
+      return { success: false, reason: "リーチ中はツモ切りのみ" };
+    }
+    this.#discard("east", index);
+    this.#loop();
     this.#emit();
+    return { success: true };
+  }
+
+  /**
+   * リーチを宣言して打牌する。宣言可能な牌 (riichiCandidates) の index のみ受理。
+   * リーチ成立は「この打牌がロンされなかった時点」(#commitRiichi)。宣言牌がロンされたら不成立。
+   */
+  humanRiichiDiscard(index: number): ActionAttempt {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
+      return { success: false, reason: "ターンが違います" };
+    }
+    if (this.#state.lastDrawTile === null) {
+      return { success: false, reason: "ツモ牌がありません" };
+    }
+    if (!this.#riichiPreconditionsMet("east")) {
+      return { success: false, reason: "リーチできません" };
+    }
+    if (!this.#state.riichiCandidates.includes(index)) {
+      return { success: false, reason: "その牌ではテンパイを保てません" };
+    }
+    this.#pendingRiichi = "east";
+    this.#discard("east", index);
+    this.#loop();
+    this.#emit();
+    return { success: true };
   }
 
   // 人間プレイヤーが手牌を手動で並び替える (from の牌を to の位置へ移動)。
@@ -94,103 +243,598 @@ export class GameController {
     this.#emit();
   }
 
-  humanDeclareTsumo(): TsumoAttempt {
+  humanDeclareTsumo(): ActionAttempt {
     if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
       return { success: false, reason: "ターンが違います" };
     }
-    return this.#tryWin("east");
+    if (this.#state.lastDrawTile === null) {
+      return { success: false, reason: "ツモ牌がありません" };
+    }
+    const result = this.#tryWin("east", { isTsumo: true });
+    if (result.success) this.#emit();
+    return result;
   }
 
-  #tryWin(seat: Seat): TsumoAttempt {
-    const player = this.#state.players[seat];
-    const winForm = canWin(player.hand);
-    if (!winForm) return { success: false, reason: "和了形ではありません" };
-    const ctx = {
-      isTsumo: true,
-      isMenzen: true,
-      seatWind: SEAT_WIND[seat],
-      roundWind: this.#state.roundWind,
-    };
-    const judged = judgeYaku(winForm, player.hand, ctx);
-    if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
-      return { success: false, reason: "AWS役がありません" };
+  /** claim フェーズでの宣言。chi は offers.chi の index で指定する */
+  humanClaim(choice: { kind: ClaimKind; chiIndex?: number }): ActionAttempt {
+    const claim = this.#state.claim;
+    if (this.#state.phase !== "claim" || !claim) {
+      return { success: false, reason: "鳴きフェーズではありません" };
     }
-    const isDealer = seat === "east";
-    const score = calcScore({
-      totalHan: judged.totalHan,
-      isDealer,
-      isTsumo: true,
-    });
-    const loser: Seat = seat === "east" ? "south" : "east";
-    this.#state.players[seat].score += score.winnerGain;
-    this.#state.players[loser].score -= score.loserPay;
-    const info: WinInfo = {
-      winner: seat,
-      isTsumo: true,
-      hand: [...player.hand],
-      yakus: judged.yakus,
-      totalHan: judged.totalHan,
-      isYakuman: judged.isYakuman,
-      score: score.winnerGain,
-    };
-    this.#state.winInfo = info;
-    this.#state.phase = "win";
+    const offers = claim.offers;
+    let humanClaim: CpuClaim;
+    if (choice.kind === "ron") {
+      if (!offers.ron) return { success: false, reason: "ロンできません" };
+      humanClaim = { seat: "east", kind: "ron" };
+    } else if (choice.kind === "kan") {
+      if (!offers.kan) return { success: false, reason: "カンできません" };
+      humanClaim = { seat: "east", kind: "kan" };
+    } else if (choice.kind === "pon") {
+      if (!offers.pon) return { success: false, reason: "ポンできません" };
+      humanClaim = { seat: "east", kind: "pon" };
+    } else {
+      const variant = offers.chi[choice.chiIndex ?? 0];
+      if (!variant) return { success: false, reason: "チーできません" };
+      humanClaim = { seat: "east", kind: "chi", chiTiles: variant.tiles };
+    }
+    // CPU の確定クレームと優先解決 (ロン>カン=ポン>チー、同位は頭ハネ)
+    const winner = resolveClaims(
+      claim.cpuClaim ? [humanClaim, claim.cpuClaim] : [humanClaim],
+      claim.discarder,
+      SEAT_ORDER,
+    )!;
+    this.#state.claim = null;
+    this.#state.phase = "discard";
+    this.#executeClaim(winner, claim.discarder, claim.tile);
+    this.#loop();
     this.#emit();
     return { success: true };
   }
 
-  #advanceTurn(): void {
-    // 次プレイヤーへ
-    const nextSeat: Seat = this.#state.turn === "east" ? "south" : "east";
-    this.#state.turn = nextSeat;
-    // 山が空なら流局
+  /** claim フェーズを見送る。CPU のクレームが残っていればそれを実行 */
+  humanSkipClaim(): void {
+    const claim = this.#state.claim;
+    if (this.#state.phase !== "claim" || !claim) return;
+    this.#state.claim = null;
+    this.#state.phase = "discard";
+    if (claim.cpuClaim) {
+      this.#executeClaim(claim.cpuClaim, claim.discarder, claim.tile);
+    } else {
+      this.#advanceToNext(claim.discarder);
+    }
+    this.#loop();
+    this.#emit();
+  }
+
+  /** 自分の手番中の暗槓/加槓。index は state.selfKanOptions の添字 */
+  humanSelfKan(index: number): ActionAttempt {
+    if (this.#state.phase !== "discard" || this.#state.turn !== "east") {
+      return { success: false, reason: "ターンが違います" };
+    }
+    const opt = this.#state.selfKanOptions[index];
+    if (!opt) return { success: false, reason: "カンできる牌がありません" };
+    if (this.#state.wall.length === 0) {
+      return { success: false, reason: "山が残っていません" };
+    }
+    this.#performSelfKan("east", opt);
+    this.#loop();
+    this.#emit();
+    return { success: true };
+  }
+
+  // ---- 内部: ターン駆動 ----
+
+  /**
+   * 状態機械のドライバ。「phase=discard かつ turn が CPU」の間だけ1手ずつ進め、
+   * 人間の入力待ち / claim 応答待ち / 終局で停止する。再帰しない。
+   */
+  #loop(): void {
+    for (let guard = 0; guard < LOOP_GUARD; guard++) {
+      const s = this.#state;
+      if (s.phase !== "discard") return;
+      const p = s.players[s.turn];
+      if (p.isHuman) {
+        // 通常 or ツモ宣言の機会あり → 人間の入力待ちで停止
+        if (!p.isRiichi || s.canTsumo) return;
+        // リーチ中は手牌固定 → 自動ツモ切り (ツモ牌は末尾)。ツモ可能時は上で停止済み
+        this.#discard("east", p.hand.length - 1);
+        continue;
+      }
+      this.#cpuTurnStep();
+    }
+    throw new Error("game loop did not settle");
+  }
+
+  /**
+   * seat から見た他家のリーチ状況と現物。safeTileIds は全リーチ者の捨て牌 (discardedIds) の
+   * 積集合 = どのリーチに対しても 100%安全な現物。複数リーチで空になり得る (守備側は孤立牌で代替)。
+   */
+  #opponentRiichiContext(seat: Seat): { anyOpponentRiichi: boolean; safeTileIds: TileId[] } {
+    const riichiSeats = SEAT_ORDER.filter((s) => s !== seat && this.#state.players[s].isRiichi);
+    if (riichiSeats.length === 0) return { anyOpponentRiichi: false, safeTileIds: [] };
+    let safe = new Set<TileId>(this.#state.players[riichiSeats[0]!].discardedIds);
+    for (const s of riichiSeats.slice(1)) {
+      const ids = new Set(this.#state.players[s].discardedIds);
+      safe = new Set([...safe].filter((id) => ids.has(id)));
+    }
+    return { anyOpponentRiichi: true, safeTileIds: [...safe] };
+  }
+
+  /** CPU の1手番: ツモ和了 / 暗槓 / 打牌のいずれか1アクション (この優先順) */
+  #cpuTurnStep(): void {
+    const seat = this.#state.turn;
+    const player = this.#state.players[seat];
+    const drewThisTurn = this.#state.lastDrawTile !== null;
+    const personality = this.#legacyCpu ? PERSONALITIES.balanced : PERSONALITIES[CPU_PERSONALITY[seat]];
+    // 守備用文脈: 他家のリーチ状況と現物 (全リーチ者の捨て牌の積集合 = 100%安全)。
+    // legacy では守備しないので計算しない
+    const defense = this.#legacyCpu ? null : this.#opponentRiichiContext(seat);
+    const action = decideCpuAction({
+      hand: player.hand,
+      melds: player.melds,
+      ctx: {
+        isTsumo: drewThisTurn,
+        isMenzen: isMenzenHand(player.melds),
+        seatWind: this.#state.players[seat].seatWind,
+        roundWind: this.#state.roundWind,
+        isRiichi: player.isRiichi,
+        winningTileId: this.#state.lastDrawTile?.id ?? null,
+        anyOpponentRiichi: defense?.anyOpponentRiichi ?? false,
+        safeTileIds: defense?.safeTileIds ?? [],
+      },
+      riichiAllowed: this.#riichiPreconditionsMet(seat),
+      rng: this.#rng,
+      personality,
+      randomDiscard: this.#legacyCpu,
+    });
+    if (action.action === "win" && drewThisTurn) {
+      const result = this.#tryWin(seat, { isTsumo: true });
+      if (result.success) return;
+      // canDeclareWin は CPU 側でも確認しているため通常は到達しない
+    }
+    // リーチ済み: 手牌は固定。和了できなければ自動ツモ切り (末尾=ツモ牌)。暗槓も禁止。
+    if (player.isRiichi) {
+      this.#discard(seat, player.hand.length - 1);
+      return;
+    }
+    if (drewThisTurn) {
+      // 暗槓: 和了できないときだけ宣言 (リンシャン後に同席の手番が続く)
+      const ankan = this.#computeSelfKanOptions(player).find((o) => o.kind === "ankan");
+      if (ankan && this.#state.wall.length > 0) {
+        this.#performSelfKan(seat, ankan);
+        return;
+      }
+    }
+    if (action.action === "riichi") {
+      this.#pendingRiichi = seat;
+      this.#discard(seat, action.tileIndex);
+      return;
+    }
+    const idx = action.action === "discard" ? action.tileIndex : 0;
+    this.#discard(seat, idx);
+  }
+
+  /** 手牌 index の牌を河に出し、打牌後のクレーム解決へ */
+  #discard(seat: Seat, index: number): void {
+    const player = this.#state.players[seat];
+    // 自分の次打牌で一発窓が閉じる (リーチ宣言打牌時は未成立なので isIppatsu=false で無害)
+    if (player.isIppatsu) player.isIppatsu = false;
+    const tile = player.hand[index]!;
+    // 人間の手動並びは打牌でも崩さない (ソートは CPU のみ)
+    const rest = player.hand.filter((_, i) => i !== index);
+    player.hand = player.isHuman ? rest : sortTiles(rest);
+    player.discards.push(tile);
+    player.discardedIds.push(tile.id);
+    this.#state.lastDrawTile = null;
+    this.#state.lastDiscard = { seat, tile };
+    this.#refreshHumanTurnHints();
+    this.#afterDiscard(seat, tile);
+  }
+
+  /**
+   * 打牌後のクレーム解決 (状態遷移の核心):
+   * 1. 他3席の適格性を純関数で計算し、CPU 分は decideClaim で即決
+   * 2. 人間に選択肢があり CPU に先取りされないなら phase="claim" で停止
+   * 3. CPU のクレームがあれば実行、なければ次手番へ
+   */
+  #afterDiscard(discarder: Seat, tile: Tile): void {
+    const offersBySeat = new Map<Seat, ClaimOffers>();
+    for (const seat of SEAT_ORDER) {
+      if (seat === discarder) continue;
+      const p = this.#state.players[seat];
+      // 適格性は今回の打牌より前の permanentFuriten で判定する (初回の待ち牌は本人がロン可能)
+      const offers = computeEligibility({
+        hand: p.hand,
+        melds: p.melds,
+        discardedIds: p.discardedIds,
+        tile,
+        isShimocha: nextSeat(discarder) === seat,
+        seatWind: this.#state.players[seat].seatWind,
+        roundWind: this.#state.roundWind,
+        isRiichi: p.isRiichi,
+        permanentFuriten: p.permanentFuriten,
+      });
+      // リンシャン牌が無いカンは宣言不可 (セルフカン側のガードと揃える)
+      if (this.#state.wall.length === 0) offers.kan = false;
+      offersBySeat.set(seat, offers);
+    }
+    // リーチフリテン: リーチ者の待ちに今の打牌が含まれるなら以後ロン不可 (eager set, D-013)。
+    // 適格性判定の後にセットする: 本人が今回ロンするなら局が終わるので無害、見送れば以後フリテン。
+    for (const seat of SEAT_ORDER) {
+      if (seat === discarder) continue;
+      const p = this.#state.players[seat];
+      if (p.isRiichi && p.riichiWaits.includes(tile.id)) p.permanentFuriten = true;
+    }
+    const cpuClaims: CpuClaim[] = [];
+    for (const [seat, offers] of offersBySeat) {
+      const p = this.#state.players[seat];
+      if (p.isHuman) continue;
+      const kind = this.#legacyCpu
+        ? decideClaim({ offers, tile }) // 旧来: ロン / 役牌ポンのみ
+        : decideClaim({
+            offers,
+            tile,
+            personality: PERSONALITIES[CPU_PERSONALITY[seat]],
+            hand: p.hand,
+            melds: p.melds,
+            seatWind: p.seatWind,
+            roundWind: this.#state.roundWind,
+          });
+      if (kind === "chi") cpuClaims.push({ seat, kind, chiTiles: offers.chi[0]!.tiles });
+      else if (kind) cpuClaims.push({ seat, kind });
+    }
+    const cpuBest = resolveClaims(cpuClaims, discarder, SEAT_ORDER);
+
+    const humanOffers = offersBySeat.get("east");
+    const humanHasChoice =
+      humanOffers !== undefined &&
+      (humanOffers.ron || humanOffers.pon || humanOffers.kan || humanOffers.chi.length > 0);
+    if (humanHasChoice && !humanIsPreempted(humanOffers, cpuBest, discarder)) {
+      this.#state.phase = "claim";
+      this.#state.claim = { discarder, tile, offers: humanOffers, cpuClaim: cpuBest };
+      return;
+    }
+    if (cpuBest) {
+      this.#executeClaim(cpuBest, discarder, tile);
+      return;
+    }
+    this.#advanceToNext(discarder);
+  }
+
+  /** クレームの実行: ロン和了 or 副露を作って手番ジャンプ */
+  #executeClaim(claim: CpuClaim, discarder: Seat, tile: Tile): void {
+    if (claim.kind === "ron") {
+      // 宣言牌がロンされたらリーチ不成立 (棒は出ない。標準ルール)
+      this.#pendingRiichi = null;
+      this.#tryWin(claim.seat, { isTsumo: false, winTile: tile, discarder });
+      return;
+    }
+    const player = this.#state.players[claim.seat];
+    // 河から取り除く (フリテン履歴 discardedIds には残る)
+    this.#state.players[discarder].discards.pop();
+    // 宣言牌がポン/チー/カンされた場合: リーチは成立 (棒は出る) するが一発は付かない。
+    // 横向き位置は「次の打牌」(discards から消えた後の length) を指す (§1-12)。
+    if (this.#pendingRiichi !== null) {
+      const seat = this.#pendingRiichi;
+      this.#commitRiichi(seat, false, this.#state.players[seat].discards.length);
+    }
+    // 任意の副露成立で全席の一発が消える
+    for (const s of SEAT_ORDER) this.#state.players[s].isIppatsu = false;
+
+    if (claim.kind === "chi") {
+      const pair = claim.chiTiles!;
+      player.hand = removeTiles(player.hand, pair);
+      player.melds.push({
+        kind: "chi",
+        tiles: [...pair, tile],
+        calledFrom: discarder,
+        calledTile: tile,
+      });
+    } else {
+      const need = claim.kind === "pon" ? TILES_FROM_HAND_FOR_PON : TILES_FROM_HAND_FOR_KAN;
+      const taken: Tile[] = [];
+      player.hand = player.hand.filter((t) => {
+        if (t.id === tile.id && taken.length < need) {
+          taken.push(t);
+          return false;
+        }
+        return true;
+      });
+      player.melds.push({
+        kind: claim.kind === "pon" ? "pon" : "minkan",
+        tiles: [...taken, tile],
+        calledFrom: discarder,
+        calledTile: tile,
+      });
+    }
+
+    this.#state.turn = claim.seat;
+    if (claim.kind === "kan") {
+      this.#revealKanDora();
+      this.#drawRinshan(claim.seat);
+      return;
+    }
+    // ポン/チー後はツモ無しで打牌待ち (lastDrawTile=null がツモ和了不可のゲート)
+    this.#state.lastDrawTile = null;
+    this.#state.phase = "discard";
+    this.#refreshHumanTurnHints();
+  }
+
+  /** 次の席へ手番を移し、山からツモる。山が尽きていれば流局 */
+  #advanceToNext(from: Seat): void {
+    // クレームされなかった = リーチ宣言打牌が通った → 成立 (一発あり)。
+    // 壁0チェックの前に行う: 最終打牌リーチが流局しても棒は出る (D-013)。
+    if (this.#pendingRiichi !== null) {
+      const seat = this.#pendingRiichi;
+      this.#commitRiichi(seat, true, this.#state.players[seat].discards.length - 1);
+    }
+    const seat = nextSeat(from);
+    this.#state.turn = seat;
     if (this.#state.wall.length === 0) {
       this.#state.phase = "draw_game";
       return;
     }
     const drawn = drawFromWall(this.#state.wall);
     this.#state.wall = drawn.remainingWall;
-    if (!drawn.tile) {
+    const player = this.#state.players[seat];
+    // 人間(east)はツモ後に再ソートせず手動の並びを維持し、ツモ牌を末尾に追加する。
+    // (自動整列は初回配牌のみ。startNewRound 参照)
+    player.hand = player.isHuman
+      ? [...player.hand, drawn.tile!]
+      : [...sortTiles(player.hand), drawn.tile!];
+    this.#state.lastDrawTile = drawn.tile;
+    this.#state.phase = "discard";
+    this.#refreshHumanTurnHints();
+  }
+
+  // ---- 内部: カン ----
+
+  /** 暗槓/加槓の実行 + リンシャンツモ */
+  #performSelfKan(seat: Seat, opt: SelfKanOption): void {
+    const player = this.#state.players[seat];
+    if (opt.kind === "ankan") {
+      const tiles = player.hand.filter((t) => t.id === opt.tileId);
+      player.hand = player.hand.filter((t) => t.id !== opt.tileId);
+      player.melds.push({ kind: "ankan", tiles, calledFrom: null, calledTile: null });
+    } else {
+      const meldIdx = player.melds.findIndex(
+        (m) => m.kind === "pon" && m.tiles[0]!.id === opt.tileId,
+      );
+      const pon = player.melds[meldIdx]!;
+      const addedIdx = player.hand.findIndex((t) => t.id === opt.tileId);
+      const added = player.hand[addedIdx]!;
+      player.hand = player.hand.filter((_, i) => i !== addedIdx);
+      // 槍槓 (加槓へのロン) は未対応 (docs/plans 参照)
+      player.melds[meldIdx] = {
+        kind: "kakan",
+        tiles: [...pon.tiles, added],
+        calledFrom: pon.calledFrom,
+        calledTile: pon.calledTile,
+      };
+    }
+    this.#revealKanDora();
+    this.#drawRinshan(seat);
+  }
+
+  /** カン成立時に即カンドラを1枚公開する (明槓の「打牌後めくり」は簡略化: D-012) */
+  #revealKanDora(): void {
+    this.#state.doraIndicatorCount = Math.min(
+      this.#state.doraIndicatorCount + 1,
+      MAX_DORA_INDICATORS,
+    );
+  }
+
+  /** リンシャンツモ: ライブ壁の末尾から補充 (王牌14枚は固定のまま) */
+  #drawRinshan(seat: Seat): void {
+    if (this.#state.wall.length === 0) {
       this.#state.phase = "draw_game";
       return;
     }
-    const player = this.#state.players[nextSeat];
-    // 人間(east)はツモ後に再ソートせず手動の並びを維持し、ツモ牌を末尾に追加する。
-    // (自動整列は初回配牌のみ。startNewRound 参照)
-    player.hand =
-      nextSeat === "east"
-        ? [...player.hand, drawn.tile]
-        : [...sortTiles(player.hand), drawn.tile];
-    this.#state.lastDrawTile = drawn.tile;
+    const drawn = drawFromWallEnd(this.#state.wall);
+    this.#state.wall = drawn.remainingWall;
+    const player = this.#state.players[seat];
+    // 人間の手動並びはリンシャンツモでも維持する
+    player.hand = player.isHuman
+      ? [...player.hand, drawn.tile!]
+      : [...sortTiles(player.hand), drawn.tile!];
+    this.#state.lastDrawTile = drawn.tile; // リンシャンツモ和了可能
     this.#state.phase = "discard";
-
-    if (nextSeat === "south") {
-      this.#runCpuTurn();
-    }
+    this.#refreshHumanTurnHints();
   }
 
-  #runCpuTurn(): void {
-    const player = this.#state.players.south;
-    const action = decideCpuAction({
-      hand: player.hand,
-      ctx: {
-        isTsumo: true,
-        isMenzen: true,
-        seatWind: SEAT_WIND.south,
-        roundWind: this.#state.roundWind,
-      },
-      rng: this.#rng,
+  /**
+   * 人間の手番情報 (暗槓/加槓候補・ツモ和了可否) を更新する。
+   * 人間のツモ番でなければ両方クリアする。状態遷移のたびに呼ぶ。
+   */
+  #refreshHumanTurnHints(): void {
+    const east = this.#state.players.east;
+    const isHumanDrawTurn =
+      this.#state.turn === "east" && this.#state.lastDrawTile !== null;
+    // リーチ後はカン (暗槓含む) を全面禁止 → 候補を抑止 (D-013)
+    this.#state.selfKanOptions =
+      isHumanDrawTurn && !east.isRiichi ? this.#computeSelfKanOptions(east) : [];
+    this.#state.canTsumo = isHumanDrawTurn && this.#canTsumoNow(east);
+    this.#state.riichiCandidates = this.#riichiPreconditionsMet("east")
+      ? riichiDiscardIndices(east.hand, east.melds)
+      : [];
+  }
+
+  /**
+   * リーチ宣言の前提条件 (テンパイを保つ打牌の有無は別途 riichiDiscardIndices で確認):
+   * その席のツモ直後 / 門前 / 1000点以上 / ライブ壁≥1 / 未リーチ。
+   * ライブ壁≥1 は最簡採用 (本プロジェクトはノーテン罰符・形式テンパイ概念なし。D-013)。
+   */
+  #riichiPreconditionsMet(seat: Seat): boolean {
+    const p = this.#state.players[seat];
+    return (
+      this.#state.turn === seat &&
+      this.#state.lastDrawTile !== null &&
+      !p.isRiichi &&
+      isMenzenHand(p.melds) &&
+      p.score >= RIICHI_COST &&
+      this.#state.wall.length >= 1
+    );
+  }
+
+  /**
+   * リーチ成立を確定する: 供託支払い・isRiichi・一発フラグ・待ち固定・横向き位置を記録。
+   * withIppatsu はクレームされず通った宣言 (#advanceToNext) のみ true。
+   */
+  #commitRiichi(seat: Seat, withIppatsu: boolean, riichiDiscardIndex: number): void {
+    const p = this.#state.players[seat];
+    p.score -= RIICHI_COST;
+    this.#state.riichiPot += RIICHI_COST;
+    p.isRiichi = true;
+    p.isIppatsu = withIppatsu;
+    p.riichiWaits = winningTiles(p.hand, p.melds);
+    p.riichiDiscardIndex = riichiDiscardIndex;
+    this.#pendingRiichi = null;
+  }
+
+  /** ツモ和了が宣言可能か (UI のボタン活性用)。判定規約は #tryWin と同一 */
+  #canTsumoNow(player: Player): boolean {
+    const winForm = canWin(player.hand, player.melds);
+    if (!winForm) return false;
+    // 呼び出し元 (#refreshHumanTurnHints) が isHumanDrawTurn で lastDrawTile 非 null をガード済み
+    const judged = judgeYaku(winForm, effectiveHandTiles(player.hand, player.melds), {
+      isTsumo: true,
+      isMenzen: isMenzenHand(player.melds),
+      seatWind: player.seatWind,
+      roundWind: this.#state.roundWind,
+      isRiichi: player.isRiichi,
+      isIppatsu: player.isIppatsu,
+      winningTileId: this.#state.lastDrawTile!.id,
+      melds: player.melds,
     });
-    if (action.action === "win") {
-      this.#tryWin("south");
-      return;
+    return canDeclareWin(judged.yakus, judged.isYakuman);
+  }
+
+  /** ツモ済みの手番中に宣言できる暗槓/加槓の候補 */
+  #computeSelfKanOptions(player: Player): SelfKanOption[] {
+    if (this.#state.lastDrawTile === null) return [];
+    const options: SelfKanOption[] = [];
+    const counts = new Map<TileId, number>();
+    for (const t of player.hand) counts.set(t.id, (counts.get(t.id) ?? 0) + 1);
+    for (const [tileId, count] of counts) {
+      if (count === KAN_SET_SIZE) options.push({ kind: "ankan", tileId });
     }
-    const idx = action.tileIndex;
-    const tile = player.hand[idx]!;
-    player.hand = player.hand.filter((_, i) => i !== idx);
-    player.discards.push(tile);
-    this.#state.lastDrawTile = null;
-    this.#advanceTurn();
+    for (const meld of player.melds) {
+      if (meld.kind === "pon" && counts.has(meld.tiles[0]!.id)) {
+        options.push({ kind: "kakan", tileId: meld.tiles[0]!.id });
+      }
+    }
+    return options;
+  }
+
+  // ---- 内部: 和了 ----
+
+  #tryWin(
+    seat: Seat,
+    opts: { isTsumo: true } | { isTsumo: false; winTile: Tile; discarder: Seat },
+  ): ActionAttempt {
+    const player = this.#state.players[seat];
+    const concealed = opts.isTsumo ? player.hand : [...player.hand, opts.winTile];
+    const winForm = canWin(concealed, player.melds);
+    if (!winForm) return { success: false, reason: "和了形ではありません" };
+    // ツモ時の lastDrawTile は呼び出し元でガード済み (humanDeclareTsumo / #cpuTurnStep の
+    // drewThisTurn / #drawRinshan 直後) のため非 null
+    const judged = judgeYaku(winForm, effectiveHandTiles(concealed, player.melds), {
+      isTsumo: opts.isTsumo,
+      isMenzen: isMenzenHand(player.melds),
+      seatWind: this.#state.players[seat].seatWind,
+      roundWind: this.#state.roundWind,
+      isRiichi: player.isRiichi,
+      isIppatsu: player.isIppatsu,
+      winningTileId: opts.isTsumo ? this.#state.lastDrawTile!.id : opts.winTile.id,
+      melds: player.melds,
+    });
+    if (!canDeclareWin(judged.yakus, judged.isYakuman)) {
+      return { success: false, reason: "AWS役がありません" };
+    }
+    // ドラ・裏ドラは役ではない: AWS役ゲート通過後に飜だけ加算する。役満には乗せない (D-012/D-013)。
+    // effectiveHandTiles はカン4枚目を落とす (D-009 項5) ため、ここでは副露の全牌を使う。
+    let yakus = judged.yakus;
+    let totalHan = judged.totalHan;
+    const allTileIds = [...concealed, ...player.melds.flatMap((m) => m.tiles)].map((t) => t.id);
+    if (!judged.isYakuman) {
+      const indicators = doraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount);
+      const doraHan = countDoraHan(allTileIds, indicators.map((t) => t.id));
+      if (doraHan > 0) {
+        yakus = [...yakus, { id: "dora", name: "ドラ", han: doraHan }];
+        totalHan += doraHan;
+      }
+      // 裏ドラはリーチ和了者のみ。表ドラと同じ全牌リストで数える (D-013)
+      if (player.isRiichi) {
+        const uraInd = uraDoraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount);
+        const uraHan = countDoraHan(allTileIds, uraInd.map((t) => t.id));
+        if (uraHan > 0) {
+          yakus = [...yakus, { id: "ura-dora", name: "裏ドラ", han: uraHan }];
+          totalHan += uraHan;
+        }
+      }
+    }
+    // 国士 (fu=null) は 0 を入れるが、basePoints が han≥13 を符より先に判定するため安全
+    const fu = judged.fu ?? 0;
+    const payments = calcScore({
+      totalHan,
+      fu,
+      isDealer: player.isDealer,
+      isTsumo: opts.isTsumo,
+    });
+    const discarder = opts.isTsumo ? null : opts.discarder;
+    const deltas = this.#applyPayments(seat, discarder, payments);
+    // 供託 (リーチ棒) は和了者が総取り。payments とは別枠 (payments 合計は 0 のまま)
+    const riichiPotWon = this.#state.riichiPot;
+    this.#state.players[seat].score += riichiPotWon;
+    this.#state.riichiPot = 0;
+    const uraIndicators = player.isRiichi
+      ? uraDoraIndicators(this.#state.deadWall, this.#state.doraIndicatorCount).map((t) => t.id)
+      : null;
+    this.#state.winInfo = {
+      winner: seat,
+      isTsumo: opts.isTsumo,
+      loserSeat: discarder,
+      hand: [...concealed],
+      melds: [...player.melds],
+      yakus,
+      totalHan,
+      fu,
+      isYakuman: judged.isYakuman,
+      score: payments.total,
+      payments: deltas,
+      uraIndicators,
+      riichiPotWon,
+    };
+    this.#state.phase = "win";
+    this.#state.claim = null;
+    return { success: true };
+  }
+
+  /** 点数移動を適用し、増減一覧 (勝者+ / 支払者−) を返す */
+  #applyPayments(
+    winner: Seat,
+    discarder: Seat | null,
+    payments: ScorePayments,
+  ): Array<{ seat: Seat; delta: number }> {
+    const deltas: Array<{ seat: Seat; delta: number }> = [
+      { seat: winner, delta: payments.total },
+    ];
+    if (payments.kind === "ron") {
+      deltas.push({ seat: discarder!, delta: -payments.fromDiscarder });
+    } else {
+      for (const seat of SEAT_ORDER) {
+        if (seat === winner) continue;
+        const pay =
+          payments.kind === "tsumo-dealer" ? payments.fromEachKo
+          : this.#state.players[seat].isDealer ? payments.fromDealer
+          : payments.fromEachKo;
+        deltas.push({ seat, delta: -pay });
+      }
+    }
+    for (const { seat, delta } of deltas) {
+      this.#state.players[seat].score += delta;
+    }
+    return deltas;
   }
 
   #emit(): void {
@@ -198,32 +842,91 @@ export class GameController {
   }
 }
 
-function makePlayer(seat: Seat, isDealer: boolean, hand: Tile[], score: number): Player {
+/**
+ * 人間にクレーム窓を開かず CPU のクレームを即実行してよいか:
+ * - CPU の優先度が人間の最高位より高い (例: CPU ロン vs 人間ポン)
+ * - ダブロンで CPU が頭ハネ順で先
+ */
+function humanIsPreempted(
+  offers: ClaimOffers,
+  cpuBest: CpuClaim | null,
+  discarder: Seat,
+): boolean {
+  if (!cpuBest) return false;
+  const humanPriority =
+    offers.ron ? CLAIM_PRIORITY.ron
+    : offers.pon || offers.kan ? CLAIM_PRIORITY.pon
+    : offers.chi.length > 0 ? CLAIM_PRIORITY.chi
+    : 0;
+  const cpuPriority = CLAIM_PRIORITY[cpuBest.kind];
+  if (cpuPriority > humanPriority) return true;
+  if (cpuBest.kind === "ron" && offers.ron) {
+    return (
+      seatDistance(discarder, cpuBest.seat, SEAT_ORDER) <
+      seatDistance(discarder, "east", SEAT_ORDER)
+    );
+  }
+  return false;
+}
+
+/** id+copy の一致で手牌から指定の牌を取り除く */
+function removeTiles(hand: Tile[], toRemove: readonly Tile[]): Tile[] {
+  const out = [...hand];
+  for (const target of toRemove) {
+    const i = out.findIndex((t) => t.id === target.id && t.copy === target.copy);
+    if (i >= 0) out.splice(i, 1);
+  }
+  return out;
+}
+
+function makePlayer(
+  seat: Seat,
+  hand: Tile[],
+  score: number,
+  seatWind: SeatWind,
+  isDealer: boolean,
+): Player {
   return {
     seat,
-    seatWind: SEAT_WIND[seat],
+    seatWind,
     hand,
+    melds: [],
     discards: [],
+    discardedIds: [],
     isHuman: seat === "east",
     isDealer,
     score,
+    isRiichi: false,
+    isIppatsu: false,
+    riichiWaits: [],
+    permanentFuriten: false,
+    riichiDiscardIndex: null,
   };
 }
 
 function createInitialState(): GameState {
   return {
     wall: [],
+    deadWall: [],
+    doraIndicatorCount: 1, // deadWall 空なので doraIndicators は [] を返す (配牌前の一瞬)
     players: {
-      east: makePlayer("east", true, [], INITIAL_SCORE),
-      south: makePlayer("south", false, [], INITIAL_SCORE),
+      east: makePlayer("east", [], INITIAL_SCORE, windFor("east", "east"), true),
+      south: makePlayer("south", [], INITIAL_SCORE, windFor("east", "south"), false),
+      west: makePlayer("west", [], INITIAL_SCORE, windFor("east", "west"), false),
+      north: makePlayer("north", [], INITIAL_SCORE, windFor("east", "north"), false),
     },
     turn: "east",
     roundWind: "1z",
     roundIndex: 0,
     phase: "deal",
     lastDrawTile: null,
+    lastDiscard: null,
+    claim: null,
+    selfKanOptions: [],
+    canTsumo: false,
     winInfo: null,
+    riichiPot: 0,
+    riichiCandidates: [],
   };
 }
 
-export const _SEAT_ORDER = SEAT_ORDER;

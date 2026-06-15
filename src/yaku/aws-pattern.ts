@@ -48,7 +48,9 @@ export function detectAwsYakus(
 
     if (!matchesAny(entry, kind, handCounts, winForm)) continue;
 
-    const han = ctx.isMenzen ? entry.han : entry.hanOpen ?? entry.han;
+    // hanOpen=null は「門前限定」の意味 (yaku.json の規約)。鳴き手では不成立
+    if (!ctx.isMenzen && entry.hanOpen === null) continue;
+    const han = ctx.isMenzen ? entry.han : entry.hanOpen!;
     results.push({ id: entry.id, name: entry.name, han });
   }
 
@@ -78,8 +80,23 @@ function matchesAny(
   return false;
 }
 
+// sample 文字列は yaku.json 由来で不変 (~25個)。mpszToTiles + counts34 の再パースを毎回やると
+// detectAwsYakus がホットパス (CPU 鳴き判断) の最深ループで増幅するため、モジュールロード時に1度だけ前計算する。
+const SAMPLE_COUNTS = new Map<string, Int8Array>();
+// 七対子サンプル "AA-BB-CC-..." → ソート済み first-tile 列。matchesSevenPairsSample の再パース回避。
+const SEVEN_PAIRS_SAMPLE = new Map<string, TileId[] | null>();
+
+function sampleCountsOf(sample: string): Int8Array {
+  let counts = SAMPLE_COUNTS.get(sample);
+  if (counts === undefined) {
+    counts = counts34(mpszToTiles(sample));
+    SAMPLE_COUNTS.set(sample, counts);
+  }
+  return counts;
+}
+
 function matchesCountSuperset(handCounts: Int8Array, sample: string): boolean {
-  const sampleCounts = counts34(mpszToTiles(sample));
+  const sampleCounts = sampleCountsOf(sample);
   for (let i = 0; i < TILE_KIND_COUNT; i++) {
     if (handCounts[i]! < sampleCounts[i]!) return false;
   }
@@ -89,16 +106,38 @@ function matchesCountSuperset(handCounts: Int8Array, sample: string): boolean {
 // 七対子: サンプル形式 "AA-BB-CC-..." と手の対子集合が一致するか
 const SEVEN_PAIRS_COUNT = 7;
 
+// sample をソート済み first-tile 列に変換 (不正形式は null)。前計算テーブルに乗せる。
+function sevenPairsSampleTiles(sample: string): TileId[] | null {
+  let tiles = SEVEN_PAIRS_SAMPLE.get(sample);
+  if (tiles === undefined) {
+    const segments = sample.split("-");
+    if (segments.length !== SEVEN_PAIRS_COUNT) {
+      tiles = null;
+    } else {
+      const firstTiles = segments.map((seg) => mpszToTiles(seg)[0]);
+      tiles = firstTiles.some((t) => t === undefined)
+        ? null
+        : [...(firstTiles as TileId[])].sort();
+    }
+    SEVEN_PAIRS_SAMPLE.set(sample, tiles);
+  }
+  return tiles;
+}
+
 function matchesSevenPairsSample(handPairs: TileId[], sample: string): boolean {
   if (handPairs.length !== SEVEN_PAIRS_COUNT) return false;
-  const segments = sample.split("-");
-  if (segments.length !== SEVEN_PAIRS_COUNT) return false;
-  const sampleFirstTile = segments.map((seg) => {
-    const tiles = mpszToTiles(seg);
-    return tiles[0];
-  });
-  if (sampleFirstTile.some((t) => t === undefined)) return false;
+  const b = sevenPairsSampleTiles(sample);
+  if (b === null) return false;
   const a = [...handPairs].sort();
-  const b = [...(sampleFirstTile as TileId[])].sort();
   return a.every((t, i) => t === b[i]);
+}
+
+// モジュールロード時に全 sample を前計算 (役牌 kind ごとに seven-pairs / count-superset を振り分け)。
+for (const entry of YAKU_LIST) {
+  const kind = AWS_YAKU_KIND[entry.id];
+  if (!kind) continue;
+  for (const sample of entry.sampleMpszList ?? []) {
+    if (kind === "seven-pairs") sevenPairsSampleTiles(sample);
+    else sampleCountsOf(sample);
+  }
 }

@@ -47,31 +47,45 @@ export function buildWall(rng: RNG): Tile[] {
 }
 
 export interface DealtHands {
-  east: Tile[];
-  south: Tile[];
+  /** piles[0]=親14枚 (初ツモ込み)、以降は親の下家順に各13枚。席への割当は呼び出し側 (局の親) が決める */
+  piles: [Tile[], Tile[], Tile[], Tile[]];
   remainingWall: Tile[];
 }
 
 /**
- * 4人配牌を山先頭から実施し、east=14枚 (親)、south=13枚 (子) を返す。
- * 西家・北家分の計26枚は捨てる (空席扱い)。残り山は標準麻雀と同じ感覚で
- * 親の初ツモ済みの状態 (=山残り83枚) になる。
+ * 4人配牌を山先頭から実施し、親=14枚 (初ツモ込み)、他3家=各13枚を位置ベースで返す。
+ * 残り山は親の初ツモ済みの状態 (=83枚)。王牌の分離は splitDeadWall で行う。
  */
 export function dealInitialHands(wall: Tile[]): DealtHands {
   const work = [...wall];
-  const seats: [Tile[], Tile[], Tile[], Tile[]] = [[], [], [], []]; // east, south, west, north
+  const piles: [Tile[], Tile[], Tile[], Tile[]] = [[], [], [], []]; // 親, 下家, 対面, 上家
   // 4-4-4: 各家に TILES_PER_DEAL_ROUND 枚ずつを INITIAL_DEAL_ROUNDS 周配る
   for (let round = 0; round < INITIAL_DEAL_ROUNDS; round++) {
     for (let s = 0; s < NUM_SEATS; s++) {
-      for (let k = 0; k < TILES_PER_DEAL_ROUND; k++) seats[s]!.push(work.shift()!);
+      for (let k = 0; k < TILES_PER_DEAL_ROUND; k++) piles[s]!.push(work.shift()!);
     }
   }
   // 最後の1巡: 各家に1枚ずつ
-  for (let s = 0; s < NUM_SEATS; s++) seats[s]!.push(work.shift()!);
+  for (let s = 0; s < NUM_SEATS; s++) piles[s]!.push(work.shift()!);
   // 親の初ツモ (14枚目)
-  seats[0]!.push(work.shift()!);
+  piles[0]!.push(work.shift()!);
 
-  return { east: seats[0]!, south: seats[1]!, remainingWall: work };
+  return { piles, remainingWall: work };
+}
+
+// 王牌 (デッドウォール) の枚数。標準の14枚を確保する。
+// レイアウト: [0..4]=表ドラ表示, [5..9]=裏ドラ予約, [10..13]=リンシャン予約 (導出は src/dora.ts)
+export const DEAD_WALL_SIZE = 14;
+
+export interface WallSplit {
+  liveWall: Tile[];
+  deadWall: Tile[];
+}
+
+/** 配牌後の山の末尾 DEAD_WALL_SIZE 枚を王牌として分離する */
+export function splitDeadWall(wall: Tile[]): WallSplit {
+  const cut = Math.max(0, wall.length - DEAD_WALL_SIZE);
+  return { liveWall: wall.slice(0, cut), deadWall: wall.slice(cut) };
 }
 
 export interface DrawResult {
@@ -83,4 +97,10 @@ export function drawFromWall(wall: Tile[]): DrawResult {
   if (wall.length === 0) return { tile: null, remainingWall: wall };
   const [tile, ...rest] = wall;
   return { tile: tile!, remainingWall: rest };
+}
+
+/** 山の末尾から1枚ツモる (カン後のリンシャンツモ用) */
+export function drawFromWallEnd(wall: Tile[]): DrawResult {
+  if (wall.length === 0) return { tile: null, remainingWall: wall };
+  return { tile: wall[wall.length - 1]!, remainingWall: wall.slice(0, -1) };
 }

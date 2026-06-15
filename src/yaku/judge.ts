@@ -1,6 +1,7 @@
-import type { Tile, WinForm, YakuResult, SeatWind } from "../types";
+import type { MeldLike, Tile, TileId, WinForm, YakuResult, SeatWind } from "../types";
 import { isYaochu } from "../tiles";
 import { YAKUMAN_HAN_THRESHOLD } from "../score";
+import { SEVEN_PAIRS_FU, calcFu, enumerateWinPlacements } from "../fu";
 import { judgeStandardYakus, type YakuContext } from "./standard";
 import { detectAwsYakus } from "./aws-pattern";
 import { isAwsYakuId } from "./aws-classification";
@@ -9,6 +10,7 @@ export interface JudgeResult {
   yakus: YakuResult[];
   totalHan: number;
   isYakuman: boolean;
+  fu: number | null; // 七対子=25 / 標準形=計算値 / 国士 (役満・符不問)・winningTileId null 時=null
 }
 
 export interface JudgeContext {
@@ -16,6 +18,23 @@ export interface JudgeContext {
   isMenzen: boolean;
   seatWind: SeatWind;
   roundWind: SeatWind;
+  isRiichi?: boolean; // 省略時 false
+  isIppatsu?: boolean; // 省略時 false。isRiichi=true のときのみ有効
+  // null = 適格性チェック専用パス (符を計算しない)。和了可否ゲートは AWS役の有無 +
+  // フリテンのみで符非依存のため、和了牌が確定しない呼び出し (CPU の打牌判断等) は null でよい。
+  winningTileId: TileId | null;
+  melds: MeldLike[]; // 副露 (カンの元 kind を保持)。門前は []
+}
+
+/**
+ * リーチ・一発は分解非依存なので judge.ts のトップレベルで付与する (七対子・標準形の両方に効く)。
+ * 国士無双 = 役満には付けない (点数が変わらず表示も純粋になるため。kokushi 分岐は早期 return で除外)。
+ */
+function riichiYakus(ctx: JudgeContext): YakuResult[] {
+  if (!ctx.isRiichi) return [];
+  const out: YakuResult[] = [{ id: "riichi", name: "リーチ", han: 1 }];
+  if (ctx.isIppatsu) out.push({ id: "ippatsu", name: "一発", han: 1 });
+  return out;
 }
 
 export function judgeYaku(
@@ -29,13 +48,17 @@ export function judgeYaku(
     const yakus: YakuResult[] = [
       { id: "kokushi", name: "国士無双", han: YAKUMAN_HAN_THRESHOLD },
     ];
-    return { yakus, totalHan: YAKUMAN_HAN_THRESHOLD, isYakuman: true };
+    return { yakus, totalHan: YAKUMAN_HAN_THRESHOLD, isYakuman: true, fu: null };
   }
 
   if (winForm.kind === "seven-pairs") {
     const yakus: YakuResult[] = [
       { id: "chiitoitsu", name: "七対子", han: 2 },
     ];
+    // 七対子は構造上常に門前 (canWin が副露ありを弾く) なのでツモなら門前清自摸和が複合する
+    if (ctx.isMenzen && ctx.isTsumo) {
+      yakus.push({ id: "menzen-tsumo", name: "門前清自摸和", han: 1 });
+    }
     // tanyao/honitsu/chinitsu も七対子に複合可
     if (tileIds.every((id) => !isYaochu(id))) {
       yakus.push({ id: "tanyao", name: "断么九", han: 1 });
@@ -53,35 +76,51 @@ export function judgeYaku(
     // AWS固有役 (dr-architecture など 七対子型)
     const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
     yakus.push(...awsYakus);
-    return finalize(yakus);
+    yakus.push(...riichiYakus(ctx));
+    return finalize(yakus, SEVEN_PAIRS_FU);
   }
 
-  // 標準形: 全分解を試して合計飜が最大の組合せを採用
-  let best: YakuResult[] = [];
-  let bestHan = -1;
+  // 標準形: (分解 × 和了牌配置) ごとに (han, fu) を評価し、han 降順 → fu 降順で最良を採用 (高点法)。
+  // 辞書式比較で十分な根拠: han 固定なら支払額は fu に単調非減少。han が1つ大きければ base は
+  // 2倍になり fu 差 (高々数十符) では逆転しない。満貫キャップ帯での fu タイは支払額同値。
+  const standardCtx: YakuContext = {
+    isTsumo: ctx.isTsumo,
+    isMenzen: ctx.isMenzen,
+    seatWind: ctx.seatWind,
+    roundWind: ctx.roundWind,
+  };
+  // AWS固有役は牌の multiset のみで決まり分解非依存 → ループ外で一度だけ判定
+  const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
+  let best: { yakus: YakuResult[]; han: number; fu: number } = { yakus: [], han: -1, fu: -1 };
   for (const decomp of winForm.decompositions) {
-    const standardCtx: YakuContext = {
-      isTsumo: ctx.isTsumo,
-      isMenzen: ctx.isMenzen,
-      seatWind: ctx.seatWind,
-      roundWind: ctx.roundWind,
-    };
-    const stdYakus = judgeStandardYakus(decomp, standardCtx);
-    const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
-    const combined = [...stdYakus, ...awsYakus];
-    const han = combined.reduce((sum, y) => sum + y.han, 0);
-    if (han > bestHan) {
-      bestHan = han;
-      best = combined;
+    // 和了牌は常に門前部分にある (ロン牌は concealed に合流済み、ツモ牌は手牌内) ため、
+    // winningTileId が非 null なら配置は必ず1つ以上ある。null は適格性パス (配置なし・符なし)
+    const placements = ctx.winningTileId
+      ? enumerateWinPlacements(decomp, ctx.melds, ctx.winningTileId)
+      : [null];
+    for (const p of placements) {
+      const stdYakus = judgeStandardYakus(decomp, standardCtx, p?.waitShape ?? null);
+      const combined = [...stdYakus, ...awsYakus];
+      const han = combined.reduce((sum, y) => sum + y.han, 0);
+      const fu = p
+        ? calcFu(decomp, ctx.melds, ctx.winningTileId!, p, {
+            ...standardCtx,
+            isPinfu: stdYakus.some((y) => y.id === "pinfu"),
+          })
+        : -1;
+      if (han > best.han || (han === best.han && fu > best.fu)) {
+        best = { yakus: combined, han, fu };
+      }
     }
   }
-  return finalize(best);
+  // リーチ・一発は分解非依存の定数加算なので best 選択後に付与する (han の argmax を変えない)
+  return finalize([...best.yakus, ...riichiYakus(ctx)], best.fu >= 0 ? best.fu : null);
 }
 
-function finalize(yakus: YakuResult[]): JudgeResult {
+function finalize(yakus: YakuResult[], fu: number | null): JudgeResult {
   const totalHan = yakus.reduce((sum, y) => sum + y.han, 0);
   const isYakuman = yakus.some((y) => y.han >= YAKUMAN_HAN_THRESHOLD);
-  return { yakus, totalHan, isYakuman };
+  return { yakus, totalHan, isYakuman, fu };
 }
 
 /**

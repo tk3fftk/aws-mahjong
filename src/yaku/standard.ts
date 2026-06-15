@@ -1,5 +1,6 @@
 import type { Decomposition, Meld, SeatWind, TileId, YakuResult } from "../types";
 import { isDragon, isHonor, isWind, isYaochu, numberOf, suitOf } from "../tiles";
+import type { WaitShape } from "../fu";
 
 export interface YakuContext {
   isTsumo: boolean;
@@ -12,8 +13,14 @@ export interface YakuContext {
  * 標準形 (4面子1雀頭) の分解1つに対して、標準麻雀の役を判定する。
  * AWS固有役 (5z/6z/7z 刻子 = kiro/cost-explorer/iam) は aws-pattern.ts 側で
  * 判定するため、ここではスキップする (重複付与防止)。
+ * waitShape は和了牌の待ち形 (平和の両面待ち条件に使う)。
+ * null = 待ち形不問 (和了牌が確定しない適格性チェック専用パス互換)。
  */
-export function judgeStandardYakus(decomp: Decomposition, ctx: YakuContext): YakuResult[] {
+export function judgeStandardYakus(
+  decomp: Decomposition,
+  ctx: YakuContext,
+  waitShape: WaitShape | null = null,
+): YakuResult[] {
   const out: YakuResult[] = [];
   const tiles = collectAllTiles(decomp);
 
@@ -22,8 +29,13 @@ export function judgeStandardYakus(decomp: Decomposition, ctx: YakuContext): Yak
     out.push({ id: "menzen-tsumo", name: "門前清自摸和", han: 1 });
   }
 
-  // 平和: 4面子すべて順子 + 雀頭が役牌でない (場風/自風/三元牌 以外)
-  if (ctx.isMenzen && decomp.melds.every((m) => m.kind === "chi") && !isYakuhaiPair(decomp.pair, ctx)) {
+  // 平和: 4面子すべて順子 + 雀頭が役牌でない (場風/自風/三元牌 以外) + 両面待ち
+  if (
+    ctx.isMenzen &&
+    decomp.melds.every((m) => m.kind === "chi") &&
+    !isYakuhaiPair(decomp.pair, ctx) &&
+    (waitShape === null || waitShape === "ryanmen")
+  ) {
     out.push({ id: "pinfu", name: "平和", han: 1 });
   }
 

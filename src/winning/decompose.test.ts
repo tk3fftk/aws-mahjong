@@ -13,11 +13,22 @@ describe("decomposeStandard", () => {
     expect(first.melds.every((m) => m.kind === "chi")).toBe(true);
   });
 
-  it("純刻子手 '111m 222m 333m 444p 55s' は4刻子+対子で分解できる", () => {
+  it("純刻子手 '111m 222m 333m 444p 55s' は刻子分解と順子分解の両方が見つかる", () => {
+    // 111222333m は [111m,222m,333m] と [123m,123m,123m] の2通りに分解できる
     const result = decomposeStandard(mpszToTiles("111222333m444p55s"));
-    expect(result).toHaveLength(1);
-    expect(result[0]!.melds.every((m) => m.kind === "pon")).toBe(true);
+    expect(result).toHaveLength(2);
+    expect(result.some((d) => d.melds.every((m) => m.kind === "pon"))).toBe(true);
+    expect(
+      result.some((d) => d.melds.filter((m) => m.kind === "chi")).valueOf(),
+    ).toBeTruthy();
     expect(result[0]!.pair.tiles).toEqual(["5s", "5s"]);
+  });
+
+  it("刻子優先で平和形が隠れない: '222333444m 345s 88p' は全順子分解も返す", () => {
+    const result = decomposeStandard(mpszToTiles("222333444m345s88p"));
+    // [222m,333m,444m,345s] と [234m,234m,234m,345s] の両方
+    expect(result.some((d) => d.melds.every((m) => m.kind === "pon" || m.tiles[0] === "3s"))).toBe(true);
+    expect(result.some((d) => d.melds.every((m) => m.kind === "chi"))).toBe(true);
   });
 
   it("分解不能形 '12345678m1234p11s' は空配列を返す", () => {
@@ -62,5 +73,31 @@ describe("decomposeStandard", () => {
 
   it("13枚は分解しない (空)", () => {
     expect(decomposeStandard(mpszToTiles("123456789m1234p"))).toEqual([]);
+  });
+});
+
+describe("decomposeStandard / meldCount 指定 (副露がある手の純手牌分解)", () => {
+  it("meldCount=3: 11枚を3面子+雀頭に分解できる", () => {
+    const result = decomposeStandard(mpszToTiles("123m456p777s88s"), 3);
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0]!.melds).toHaveLength(3);
+    expect(result[0]!.pair.tiles).toEqual(["8s", "8s"]);
+  });
+
+  it("meldCount=1: 5枚を1面子+雀頭に分解できる", () => {
+    const result = decomposeStandard(mpszToTiles("123m55z"), 1);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.melds[0]!.kind).toBe("chi");
+  });
+
+  it("meldCount=0: 雀頭のみ2枚の分解 (4副露の単騎待ち)", () => {
+    const result = decomposeStandard(mpszToTiles("55z"), 0);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.melds).toEqual([]);
+    expect(result[0]!.pair.tiles).toEqual(["5z", "5z"]);
+  });
+
+  it("meldCount=3 に14枚を渡すと枚数不一致で空配列", () => {
+    expect(decomposeStandard(mpszToTiles("123456789m123p11s"), 3)).toEqual([]);
   });
 });
