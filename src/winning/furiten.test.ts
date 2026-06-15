@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { winningTiles, isFuriten } from "./furiten";
+import { winningForms, winningTiles, isFuriten } from "./furiten";
+import { canWin } from "./check";
 import { mpszToTiles } from "../tiles";
 import type { MeldLike, Tile, TileId } from "../types";
 
@@ -46,6 +47,35 @@ describe("winningTiles", () => {
     // ↑ 1m×4 + 345m + 678m + 99p = 11枚, melds 1組で計13枚相当の打牌後形
     const waits = winningTiles(concealed, [meld("pon", "555z")]);
     expect(waits).not.toContain("1m");
+  });
+});
+
+describe("winningForms", () => {
+  it("id 列は winningTiles と一致する", () => {
+    const concealed = toTiles("23m111z456s789s55z");
+    const ids = winningForms(concealed).map((x) => x.id);
+    expect(ids).toEqual(winningTiles(concealed));
+  });
+
+  it("各 form は canWin([...concealed, 待ち牌]) と等価", () => {
+    const concealed = toTiles("23m111z456s789s55z");
+    for (const { id, form } of winningForms(concealed)) {
+      expect(form).toEqual(canWin([...concealed, { id, copy: 0 }]));
+    }
+  });
+
+  it("副露込みでも id 列と form が一致する", () => {
+    const concealed = toTiles("23m456s789s55z");
+    const melds = [meld("pon", "111z")];
+    const forms = winningForms(concealed, melds);
+    expect(forms.map((x) => x.id)).toEqual(winningTiles(concealed, melds));
+    for (const { id, form } of forms) {
+      expect(form).toEqual(canWin([...concealed, { id, copy: 0 }], melds));
+    }
+  });
+
+  it("ノーテンは空配列", () => {
+    expect(winningForms(toTiles("1m3m5m7m9m1p3p5p7p9p1s3s5s"))).toEqual([]);
   });
 });
 

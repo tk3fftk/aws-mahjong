@@ -1,4 +1,4 @@
-import type { MeldLike, Tile, TileId } from "../types";
+import type { MeldLike, Tile, TileId, WinForm } from "../types";
 import { ALL_TILE_IDS, tileIdIndex, counts34 } from "../tiles";
 import { canWin } from "./check";
 
@@ -7,20 +7,34 @@ import { canWin } from "./check";
 const MAX_COPIES = 4;
 
 /**
- * テンパイ牌 (待ち) の列挙。concealed は打牌直後の純手牌 (13 - 3*melds.length 枚)。
- * 全34種を canWin で試すブルートフォース (1呼び出し <1ms、打牌ごと×3席なので十分速い)。
+ * テンパイ牌 (待ち) と、その牌で和了したときの和了形 (canWin の結果) を対にして列挙。
+ * concealed は打牌直後の純手牌 (13 - 3*melds.length 枚)。全34種を canWin で試すブルートフォース。
+ *
+ * 呼び出し側 (keepsAwsWinPath 等) が和了形をそのまま judgeYaku に渡せるよう form を返すことで、
+ * 「待ち列挙の canWin」と「役判定前の canWin」の二度手間を排除する。
  */
-export function winningTiles(concealed: Tile[], melds: MeldLike[] = []): TileId[] {
+export function winningForms(
+  concealed: Tile[],
+  melds: MeldLike[] = [],
+): { id: TileId; form: WinForm }[] {
   const held = counts34([
     ...concealed.map((t) => t.id),
     ...melds.flatMap((m) => m.tiles.map((t) => t.id)),
   ]);
-  const out: TileId[] = [];
+  const out: { id: TileId; form: WinForm }[] = [];
   for (const id of ALL_TILE_IDS) {
     if (held[tileIdIndex(id)]! >= MAX_COPIES) continue;
-    if (canWin([...concealed, { id, copy: 0 }], melds)) out.push(id);
+    const form = canWin([...concealed, { id, copy: 0 }], melds);
+    if (form) out.push({ id, form });
   }
   return out;
+}
+
+/**
+ * テンパイ牌 (待ち) の列挙。和了形が不要な呼び出し向けの薄いラッパ。
+ */
+export function winningTiles(concealed: Tile[], melds: MeldLike[] = []): TileId[] {
+  return winningForms(concealed, melds).map((x) => x.id);
 }
 
 /**

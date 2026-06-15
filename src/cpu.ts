@@ -1,7 +1,7 @@
 import type { ClaimKind, ClaimOffers, MeldLike, SeatWind, Tile, TileId } from "./types";
 import { counts34, isDragon, isHonor, isYaochu, numberOf, tileIdIndex } from "./tiles";
 import { canWin } from "./winning/check";
-import { winningTiles } from "./winning/furiten";
+import { winningForms } from "./winning/furiten";
 import { effectiveHandTiles, isMenzenHand } from "./winning/melds";
 import { judgeYaku, canDeclareWin } from "./yaku/judge";
 import { riichiDiscardIndices } from "./riichi";
@@ -233,16 +233,22 @@ function keepsAwsWinPath(
   }
   const newMelds = [...melds, newMeld];
 
-  // 鳴き後は「テンパイより1枚多い」形。各打牌候補でテンパイになり、待ちに AWS役があるか
-  for (const di of riichiDiscardIndices(concealed, newMelds)) {
+  // 鳴き後は「テンパイより1枚多い」形。各打牌候補でテンパイになり、待ちに AWS役があるか。
+  // 打牌候補ごとに winningForms を1回だけ回し、和了形 (form) をそのまま judgeYaku に渡すことで、
+  // テンパイ判定 (旧 riichiDiscardIndices) と待ち列挙と役判定前の canWin を1パスに畳む。
+  // 同一 tileId の打牌は結果が同じなので skip (旧 riichiDiscardIndices の TileId キャッシュ相当)。
+  const isMenzen = isMenzenHand(newMelds);
+  const seenDiscard = new Set<TileId>();
+  for (let di = 0; di < concealed.length; di++) {
+    const discardId = concealed[di]!.id;
+    if (seenDiscard.has(discardId)) continue;
+    seenDiscard.add(discardId);
     const ready = concealed.filter((_, j) => j !== di);
-    for (const w of winningTiles(ready, newMelds)) {
+    for (const { id: w, form } of winningForms(ready, newMelds)) {
       const full = [...ready, { id: w, copy: 0 as const }];
-      const form = canWin(full, newMelds);
-      if (!form) continue;
       const judged = judgeYaku(form, effectiveHandTiles(full, newMelds), {
         isTsumo: false,
-        isMenzen: isMenzenHand(newMelds),
+        isMenzen,
         seatWind,
         roundWind,
         winningTileId: w,
