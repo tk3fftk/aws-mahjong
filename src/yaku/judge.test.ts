@@ -87,12 +87,82 @@ describe("judgeYaku", () => {
   });
 
   it("複数分解可能な手は合計飜が最大の分解を採用する", () => {
-    // 一盃口形だが MVP で 一盃口は実装しないため、ここは Kiro と平和の関係で確認
     const hand = toHand("555z234m567m234p55s");
     const winForm = canWin(hand)!;
     const result = judgeYaku(winForm, hand, baseCtx);
-    // Kiro(1) + 平和は刻子があるので付かない + 門前清自摸和(1) + 断么九は字牌5zありで付かない
+    // Kiro(1) + 門前清自摸和(1) + 断么九は字牌5zありで付かない
     expect(result.totalHan).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("judgeYaku / 一盃口", () => {
+  it("同一順子2組で一盃口が成立 (1飜, 門前)", () => {
+    // 555z(kiro) + 123m×2 + 456p + 55p
+    const hand = toHand("555z123m123m456p55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toEqual({
+      id: "iipeiko",
+      name: "一盃口",
+      han: 1,
+    });
+  });
+
+  it("一盃口は門前限定: isMenzen=false では付かない", () => {
+    // 同じ手を副露ありとして扱う
+    const hand = toHand("555z123m123m456p55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isMenzen: false });
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+  });
+
+  it("異なる順子しかなければ一盃口は付かない", () => {
+    // 555z + 123m + 456m + 789m + 55p (全順子だが全て異なる)
+    const hand = toHand("555z123m456m789m55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+  });
+});
+
+describe("judgeYaku / 二盃口", () => {
+  it("標準形の純二盃口 (七対子にならない形) で 3飜・一盃口は付かない", () => {
+    // 123m123m + 234m234m (2m/3m が4枚なので七対子にはならない) + 55p
+    const hand = toHand("112222333344m55p");
+    const winForm = canWin(hand)!;
+    expect(winForm.kind).toBe("standard");
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toEqual({
+      id: "ryanpeikou",
+      name: "二盃口",
+      han: 3,
+    });
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+  });
+
+  it("七対子形の二盃口は高点法で二盃口(3飜)として採点される", () => {
+    // 234m234m + 234p234p + 99s: 七対子形でもあるが二盃口が優先
+    const hand = toHand("223344m223344p99s");
+    const winForm = canWin(hand)!;
+    expect(winForm.kind).toBe("seven-pairs");
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "chiitoitsu")).toBeUndefined();
+  });
+
+  it("二盃口は門前限定: isMenzen=false では付かない", () => {
+    const hand = toHand("112222333344m55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isMenzen: false });
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeUndefined();
+  });
+
+  it("純粋な七対子 (二盃口形でない) は従来どおり七対子として採点される", () => {
+    const hand = toHand("11m22m66m33p44s55z77z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "chiitoitsu")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeUndefined();
   });
 });
 

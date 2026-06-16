@@ -2,6 +2,7 @@ import type { MeldLike, Tile, TileId, WinForm, YakuResult, SeatWind } from "../t
 import { isYaochu } from "../tiles";
 import { YAKUMAN_HAN_THRESHOLD } from "../score";
 import { SEVEN_PAIRS_FU, calcFu, enumerateWinPlacements } from "../fu";
+import { decomposeStandard } from "../winning/decompose";
 import { judgeStandardYakus, type YakuContext } from "./standard";
 import { detectAwsYakus } from "./aws-pattern";
 import { isAwsYakuId } from "./aws-classification";
@@ -52,6 +53,17 @@ export function judgeYaku(
   }
 
   if (winForm.kind === "seven-pairs") {
+    // 二盃口形 (七対子だが標準形にも分解できる手) は、高点法で標準形(二盃口3飜+) が
+    // 七対子(2飜) を必ず上回るため標準形として評価する。標準分解できる7対子は構造上
+    // 必ず二盃口になる (各牌2枚 → 面子は同一順子のペア)。
+    const ryanpeikouDecomps = decomposeStandard(tileIds);
+    if (ryanpeikouDecomps.length > 0) {
+      return judgeYaku(
+        { kind: "standard", decompositions: ryanpeikouDecomps },
+        hand,
+        ctx,
+      );
+    }
     const yakus: YakuResult[] = [
       { id: "chiitoitsu", name: "七対子", han: 2 },
     ];
@@ -91,6 +103,9 @@ export function judgeYaku(
   };
   // AWS固有役は牌の multiset のみで決まり分解非依存 → ループ外で一度だけ判定
   const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
+  // 冗長化(AWS一盃口)が立つ手では標準の一盃口/二盃口を複合させない (yaku.json: redundancy 参照)。
+  // redundancy は AWS役なので awsYakus 側にのみ現れ、分解・配置に依存しない。
+  const hasRedundancy = awsYakus.some((y) => y.id === "redundancy");
   let best: { yakus: YakuResult[]; han: number; fu: number } = { yakus: [], han: -1, fu: -1 };
   for (const decomp of winForm.decompositions) {
     // 和了牌は常に門前部分にある (ロン牌は concealed に合流済み、ツモ牌は手牌内) ため、
@@ -101,7 +116,10 @@ export function judgeYaku(
     for (const p of placements) {
       const stdYakus = judgeStandardYakus(decomp, standardCtx, p?.waitShape ?? null);
       const combined = [...stdYakus, ...awsYakus];
-      const han = combined.reduce((sum, y) => sum + y.han, 0);
+      const effective = hasRedundancy
+        ? combined.filter((y) => y.id !== "iipeiko" && y.id !== "ryanpeikou")
+        : combined;
+      const han = effective.reduce((sum, y) => sum + y.han, 0);
       const fu = p
         ? calcFu(decomp, ctx.melds, ctx.winningTileId!, p, {
             ...standardCtx,
@@ -109,7 +127,7 @@ export function judgeYaku(
           })
         : -1;
       if (han > best.han || (han === best.han && fu > best.fu)) {
-        best = { yakus: combined, han, fu };
+        best = { yakus: effective, han, fu };
       }
     }
   }

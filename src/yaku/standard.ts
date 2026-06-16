@@ -62,6 +62,25 @@ export function judgeStandardYakus(
     out.push({ id: "toitoi", name: "対々和", han: 2 });
   }
 
+  // 一盃口/二盃口: 同一順子のペア数で判定 (門前限定)。chi tiles は低→高順で格納済みのため join で比較可。
+  if (ctx.isMenzen) {
+    const keyCounts = new Map<string, number>();
+    for (const m of decomp.melds) {
+      if (m.kind !== "chi") continue;
+      const k = m.tiles.join(",");
+      keyCounts.set(k, (keyCounts.get(k) ?? 0) + 1);
+    }
+    // floor(出現数/2) の総和 = 同一順子ペア数。2以上=二盃口(3飜), 1=一盃口(1飜)。
+    // 例: 123m×4 → 2ペア=二盃口 / 123m×3 → 1ペア=一盃口。
+    let peikou = 0;
+    for (const c of keyCounts.values()) peikou += Math.floor(c / 2);
+    if (peikou >= 2) {
+      out.push({ id: "ryanpeikou", name: "二盃口", han: 3 });
+    } else if (peikou === 1) {
+      out.push({ id: "iipeiko", name: "一盃口", han: 1 });
+    }
+  }
+
   // 混一色 / 清一色 (排他: 清一色採用時は混一色を付けない)
   const suits = new Set(tiles.map((t) => suitOf(t)));
   const numberSuits = [...suits].filter((s) => s !== "z");
