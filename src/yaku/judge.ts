@@ -101,7 +101,10 @@ export function judgeYaku(
     for (const p of placements) {
       const stdYakus = judgeStandardYakus(decomp, standardCtx, p?.waitShape ?? null);
       const combined = [...stdYakus, ...awsYakus];
-      const han = combined.reduce((sum, y) => sum + y.han, 0);
+      // 冗長化(AWS一盃口)と標準一盃口は複合禁止 (yaku.json 参照)
+      const hasRedundancy = combined.some((y) => y.id === "redundancy");
+      const effective = hasRedundancy ? combined.filter((y) => y.id !== "iipeiko") : combined;
+      const han = effective.reduce((sum, y) => sum + y.han, 0);
       const fu = p
         ? calcFu(decomp, ctx.melds, ctx.winningTileId!, p, {
             ...standardCtx,
@@ -109,7 +112,7 @@ export function judgeYaku(
           })
         : -1;
       if (han > best.han || (han === best.han && fu > best.fu)) {
-        best = { yakus: combined, han, fu };
+        best = { yakus: effective, han, fu };
       }
     }
   }

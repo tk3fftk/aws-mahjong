@@ -87,12 +87,41 @@ describe("judgeYaku", () => {
   });
 
   it("複数分解可能な手は合計飜が最大の分解を採用する", () => {
-    // 一盃口形だが MVP で 一盃口は実装しないため、ここは Kiro と平和の関係で確認
     const hand = toHand("555z234m567m234p55s");
     const winForm = canWin(hand)!;
     const result = judgeYaku(winForm, hand, baseCtx);
-    // Kiro(1) + 平和は刻子があるので付かない + 門前清自摸和(1) + 断么九は字牌5zありで付かない
+    // Kiro(1) + 門前清自摸和(1) + 断么九は字牌5zありで付かない
     expect(result.totalHan).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("judgeYaku / 一盃口", () => {
+  it("同一順子2組で一盃口が成立 (1飜, 門前)", () => {
+    // 555z(kiro) + 123m×2 + 456p + 55p
+    const hand = toHand("555z123m123m456p55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toEqual({
+      id: "iipeiko",
+      name: "一盃口",
+      han: 1,
+    });
+  });
+
+  it("一盃口は門前限定: isMenzen=false では付かない", () => {
+    // 同じ手を副露ありとして扱う
+    const hand = toHand("555z123m123m456p55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isMenzen: false });
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+  });
+
+  it("異なる順子しかなければ一盃口は付かない", () => {
+    // 555z + 123m + 456m + 789m + 55p (全順子だが全て異なる)
+    const hand = toHand("555z123m456m789m55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
   });
 });
 
