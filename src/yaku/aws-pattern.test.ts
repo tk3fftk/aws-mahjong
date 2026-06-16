@@ -70,14 +70,12 @@ describe("detectAwsYakus / tile-superset 分類", () => {
 });
 
 describe("detectAwsYakus / repeated-superset 分類", () => {
-  it("冗長化(AWS一盃口): 3p2m7s × 2 を含むと 3飜", () => {
-    // 3p,3p,2m,2m,7s,7s をすべて含む → repeated superset 2倍
-    // 例: 234m + 234m + 333p + 777s + 55z = 11+ → no
-    // 123p + 234m + 123p + 234m + 77s + ... 簡単な例:
-    // 333p + 222m + 777s + 234p + 55s = 3+3+3+3+2 = 14, 3p×3, 2m×3, 7s×3 を含む
-    // → repeated-superset(2) 充足
-    const yakus = detectFromMpsz("333p222m777s234p55s");
+  it("冗長化(AWS一盃口): 3p2m7s × 2 ちょうどを含むと 3飜", () => {
+    // 3p×2,2m×2,7s×2 ちょうど (×3 にはならない) を含む真の2コピー手。
+    // 234p×2 → 3p×2, 234m×2 → 2m×2, 77s 雀頭 → 7s×2 → repeated-superset(2) 充足、(3)は不成立。
+    const yakus = detectFromMpsz("234p234p234m234m77s");
     expect(yakus.find((y) => y.id === "redundancy")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "aws-three-concealed-triples1")).toBeUndefined();
   });
 
   it("1倍しか含まない場合は不成立", () => {
@@ -129,5 +127,68 @@ describe("detectAwsYakus / isCombineAllowed", () => {
     const yakus = detectFromMpsz("555z666z234m567m22p");
     const awsOnly = yakus.filter((y) => ["kiro", "cost-explorer", "iam"].includes(y.id));
     expect(awsOnly.map((y) => y.id).sort()).toEqual(["cost-explorer", "kiro"]);
+  });
+});
+
+describe("detectAwsYakus / 強制共立の整理 (subsumption)", () => {
+  // 上位役のサンプル牌が下位役を完全包含するペアは、上位が立つと下位が必ず自動成立する。
+  // 同一構造の二重計上になるため下位役を抑制し、上位役のみ採用する。
+
+  it("CI/CDカン(6789p) が立つと CI/CDパイプライン(789p) は抑制される (門前 3飜のみ)", () => {
+    // 678p + 999p で 6789p を含む。789p も不可避に含むが、カンに吸収される。
+    const yakus = detectFromMpsz("678p999p234m567m55s");
+    expect(yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "cicd-pipeline")).toBeUndefined();
+  });
+
+  it("CI/CDカン: 鳴き手でも パイプラインは抑制され カン(hanOpen=2)のみ", () => {
+    const yakus = detectFromMpsz("678p999p234m567m55s", { isMenzen: false });
+    expect(yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(2);
+    expect(yakus.find((y) => y.id === "cicd-pipeline")).toBeUndefined();
+  });
+
+  it("Webアプリ カン(3p2m7s9s) が立つと Webアプリ・インメモリキャッシュは抑制される", () => {
+    // 3p,2m,7s,9s をすべて含む (123p→3p, 123m→2m, 789s→7s,9s)。
+    const yakus = detectFromMpsz("123p456p123m789s99m");
+    expect(yakus.find((y) => y.id === "web-application-kan")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "web-application")).toBeUndefined();
+    expect(yakus.find((y) => y.id === "in-memory-cache")).toBeUndefined();
+  });
+
+  it("Blue/Greenデプロイ カン(3p3m6m7s) が立つと Webアプリは抑制される", () => {
+    // 3p(123p), 3m(345m), 6m(678m), 7s(678s) を含む。9s は無いので in-memory は無関係。
+    const yakus = detectFromMpsz("11p123p345m678m678s");
+    expect(yakus.find((y) => y.id === "blue-green-deploy-kan")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "web-application")).toBeUndefined();
+  });
+
+  it("冗長化: Webアプリを ×2 に引き上げ (web-application 2飜 + 冗長化 3飜 = 5飜相当)", () => {
+    const yakus = detectFromMpsz("234p234p234m234m77s");
+    expect(yakus.find((y) => y.id === "redundancy")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "web-application")?.han).toBe(2);
+    expect(yakus.find((y) => y.id === "master-replica")).toBeUndefined();
+  });
+
+  it("AWS三暗刻: Webアプリ ×3 + 三暗刻 のみ、冗長化・マスターレプリカは抑制 (計6飜相当)", () => {
+    // 333p,222m,777s,234p,55s → 3p×4,2m×3,7s×3 = 3コピー相当。
+    const yakus = detectFromMpsz("333p222m777s234p55s");
+    expect(yakus.find((y) => y.id === "aws-three-concealed-triples1")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "web-application")?.han).toBe(3);
+    expect(yakus.find((y) => y.id === "redundancy")).toBeUndefined();
+    expect(yakus.find((y) => y.id === "master-replica")).toBeUndefined();
+  });
+
+  it("回帰: 単独 CI/CDパイプライン(789p, 6pなし) は 2飜のまま、カンは立たない", () => {
+    const yakus = detectFromMpsz("789p234m567m234s55z");
+    expect(yakus.find((y) => y.id === "cicd-pipeline")?.han).toBe(2);
+    expect(yakus.find((y) => y.id === "cicd-pipeline-kan")).toBeUndefined();
+  });
+
+  it("回帰: 単独 Webアプリ (反復・カン無し) は 1飜のまま", () => {
+    // 3p(123p),2m(123m),7s(678s) を各1枚。9s 無し→カン/インメモリ無し、×2 無し→冗長化無し。
+    const yakus = detectFromMpsz("123p456p123m678s99m");
+    expect(yakus.find((y) => y.id === "web-application")?.han).toBe(1);
+    expect(yakus.find((y) => y.id === "web-application-kan")).toBeUndefined();
+    expect(yakus.find((y) => y.id === "redundancy")).toBeUndefined();
   });
 });

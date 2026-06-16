@@ -54,7 +54,51 @@ export function detectAwsYakus(
     results.push({ id: entry.id, name: entry.name, han });
   }
 
-  return results;
+  return resolveAwsSubsumption(results);
+}
+
+/**
+ * 上位役のサンプル牌が下位役のサンプル牌を完全包含するペアでは、上位役が成立すると
+ * 下位役が牌構成上「必ず」自動成立する (例: CI/CDカン 6789p は必ず CI/CDパイプライン 789p を含む)。
+ * 両方を加算すると同一構造の二重計上になるため、下位役を抑制し上位役のみ採用する
+ * (麻雀の 一盃口/二盃口 が複合しないのと同じ)。
+ */
+const AWS_SUBSUMED: Record<string, readonly string[]> = {
+  // 拡張役 (カン) は下位役の上位版アーキテクチャ。下位役の「代わり」にスコアする
+  "cicd-pipeline-kan": ["cicd-pipeline"],
+  "web-application-kan": ["web-application", "in-memory-cache"],
+  "blue-green-deploy-kan": ["web-application"],
+  // 反復役の最高位段は、低位段 (冗長化) と素材役 (マスターレプリカ=777s) を内包する
+  "aws-three-concealed-triples1": ["redundancy", "master-replica"],
+};
+
+/**
+ * 反復役は Webアプリ(3p2m7s) を copies 回作っている。yaku.json の意図
+ * (冗長化=Webアプリ×2+一盃口=5飜 / 三暗刻=Webアプリ×3+三暗刻=6飜) に合わせ、
+ * 内包される web-application の飜を copies 倍に引き上げる。
+ */
+const WEB_APP_MULTIPLIER: Record<string, number> = {
+  redundancy: 2,
+  "aws-three-concealed-triples1": 3,
+};
+
+export function resolveAwsSubsumption(results: YakuResult[]): YakuResult[] {
+  const present = new Set(results.map((r) => r.id));
+
+  const suppressed = new Set<string>();
+  for (const id of present) {
+    for (const sub of AWS_SUBSUMED[id] ?? []) suppressed.add(sub);
+  }
+
+  // 反復役の最高位段に応じて web-application の飜倍率を決める (×3 が ×2 を上書き)
+  let webMult = 1;
+  for (const id of present) webMult = Math.max(webMult, WEB_APP_MULTIPLIER[id] ?? 1);
+
+  return results
+    .filter((r) => !suppressed.has(r.id))
+    .map((r) =>
+      r.id === "web-application" && webMult > 1 ? { ...r, han: r.han * webMult } : r,
+    );
 }
 
 function matchesAny(

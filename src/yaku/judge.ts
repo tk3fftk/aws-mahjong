@@ -103,9 +103,12 @@ export function judgeYaku(
   };
   // AWS固有役は牌の multiset のみで決まり分解非依存 → ループ外で一度だけ判定
   const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
-  // 冗長化(AWS一盃口)が立つ手では標準の一盃口/二盃口を複合させない (yaku.json: redundancy 参照)。
-  // redundancy は AWS役なので awsYakus 側にのみ現れ、分解・配置に依存しない。
-  const hasRedundancy = awsYakus.some((y) => y.id === "redundancy");
+  // 反復系AWS役(冗長化/AWS三暗刻)が立つ手では標準の一盃口/二盃口を複合させない (yaku.json 参照)。
+  // これらは AWS役なので awsYakus 側にのみ現れ、分解・配置に依存しない。三暗刻の手では
+  // 冗長化が subsumption で抑制され awsYakus から消えるため、両IDを見て判定する。
+  const hasAwsIipeikoFamily = awsYakus.some(
+    (y) => y.id === "redundancy" || y.id === "aws-three-concealed-triples1",
+  );
   let best: { yakus: YakuResult[]; han: number; fu: number } = { yakus: [], han: -1, fu: -1 };
   for (const decomp of winForm.decompositions) {
     // 和了牌は常に門前部分にある (ロン牌は concealed に合流済み、ツモ牌は手牌内) ため、
@@ -116,7 +119,7 @@ export function judgeYaku(
     for (const p of placements) {
       const stdYakus = judgeStandardYakus(decomp, standardCtx, p?.waitShape ?? null);
       const combined = [...stdYakus, ...awsYakus];
-      const effective = hasRedundancy
+      const effective = hasAwsIipeikoFamily
         ? combined.filter((y) => y.id !== "iipeiko" && y.id !== "ryanpeikou")
         : combined;
       const han = effective.reduce((sum, y) => sum + y.han, 0);
