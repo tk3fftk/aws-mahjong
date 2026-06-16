@@ -62,16 +62,21 @@ export function judgeStandardYakus(
     out.push({ id: "toitoi", name: "対々和", han: 2 });
   }
 
-  // 一盃口: 同一順子が2組 (門前限定・1飜)。chi tiles は低→高順で格納済みのため join で比較可。
-  // 2組対が2ペアある場合は二盃口 (未実装) のためスキップ。
+  // 一盃口/二盃口: 同一順子のペア数で判定 (門前限定)。chi tiles は低→高順で格納済みのため join で比較可。
   if (ctx.isMenzen) {
-    const chiKeys = decomp.melds
-      .filter((m) => m.kind === "chi")
-      .map((m) => m.tiles.join(","));
     const keyCounts = new Map<string, number>();
-    for (const k of chiKeys) keyCounts.set(k, (keyCounts.get(k) ?? 0) + 1);
-    const duplicatePairs = [...keyCounts.values()].filter((c) => c >= 2).length;
-    if (duplicatePairs === 1) {
+    for (const m of decomp.melds) {
+      if (m.kind !== "chi") continue;
+      const k = m.tiles.join(",");
+      keyCounts.set(k, (keyCounts.get(k) ?? 0) + 1);
+    }
+    // floor(出現数/2) の総和 = 同一順子ペア数。2以上=二盃口(3飜), 1=一盃口(1飜)。
+    // 例: 123m×4 → 2ペア=二盃口 / 123m×3 → 1ペア=一盃口。
+    let peikou = 0;
+    for (const c of keyCounts.values()) peikou += Math.floor(c / 2);
+    if (peikou >= 2) {
+      out.push({ id: "ryanpeikou", name: "二盃口", han: 3 });
+    } else if (peikou === 1) {
       out.push({ id: "iipeiko", name: "一盃口", han: 1 });
     }
   }

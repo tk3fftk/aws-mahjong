@@ -2,6 +2,7 @@ import type { MeldLike, Tile, TileId, WinForm, YakuResult, SeatWind } from "../t
 import { isYaochu } from "../tiles";
 import { YAKUMAN_HAN_THRESHOLD } from "../score";
 import { SEVEN_PAIRS_FU, calcFu, enumerateWinPlacements } from "../fu";
+import { decomposeStandard } from "../winning/decompose";
 import { judgeStandardYakus, type YakuContext } from "./standard";
 import { detectAwsYakus } from "./aws-pattern";
 import { isAwsYakuId } from "./aws-classification";
@@ -52,6 +53,17 @@ export function judgeYaku(
   }
 
   if (winForm.kind === "seven-pairs") {
+    // 二盃口形 (七対子だが標準形にも分解できる手) は、高点法で標準形(二盃口3飜+) が
+    // 七対子(2飜) を必ず上回るため標準形として評価する。標準分解できる7対子は構造上
+    // 必ず二盃口になる (各牌2枚 → 面子は同一順子のペア)。
+    const ryanpeikouDecomps = decomposeStandard(tileIds);
+    if (ryanpeikouDecomps.length > 0) {
+      return judgeYaku(
+        { kind: "standard", decompositions: ryanpeikouDecomps },
+        hand,
+        ctx,
+      );
+    }
     const yakus: YakuResult[] = [
       { id: "chiitoitsu", name: "七対子", han: 2 },
     ];
@@ -103,7 +115,9 @@ export function judgeYaku(
       const combined = [...stdYakus, ...awsYakus];
       // 冗長化(AWS一盃口)と標準一盃口は複合禁止 (yaku.json 参照)
       const hasRedundancy = combined.some((y) => y.id === "redundancy");
-      const effective = hasRedundancy ? combined.filter((y) => y.id !== "iipeiko") : combined;
+      const effective = hasRedundancy
+        ? combined.filter((y) => y.id !== "iipeiko" && y.id !== "ryanpeikou")
+        : combined;
       const han = effective.reduce((sum, y) => sum + y.han, 0);
       const fu = p
         ? calcFu(decomp, ctx.melds, ctx.winningTileId!, p, {

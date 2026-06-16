@@ -125,6 +125,47 @@ describe("judgeYaku / 一盃口", () => {
   });
 });
 
+describe("judgeYaku / 二盃口", () => {
+  it("標準形の純二盃口 (七対子にならない形) で 3飜・一盃口は付かない", () => {
+    // 123m123m + 234m234m (2m/3m が4枚なので七対子にはならない) + 55p
+    const hand = toHand("112222333344m55p");
+    const winForm = canWin(hand)!;
+    expect(winForm.kind).toBe("standard");
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toEqual({
+      id: "ryanpeikou",
+      name: "二盃口",
+      han: 3,
+    });
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+  });
+
+  it("七対子形の二盃口は高点法で二盃口(3飜)として採点される", () => {
+    // 234m234m + 234p234p + 99s: 七対子形でもあるが二盃口が優先
+    const hand = toHand("223344m223344p99s");
+    const winForm = canWin(hand)!;
+    expect(winForm.kind).toBe("seven-pairs");
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "chiitoitsu")).toBeUndefined();
+  });
+
+  it("二盃口は門前限定: isMenzen=false では付かない", () => {
+    const hand = toHand("112222333344m55p");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, { ...baseCtx, isMenzen: false });
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeUndefined();
+  });
+
+  it("純粋な七対子 (二盃口形でない) は従来どおり七対子として採点される", () => {
+    const hand = toHand("11m22m66m33p44s55z77z");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "chiitoitsu")).toBeTruthy();
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeUndefined();
+  });
+});
+
 describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
   // ゲーム層の組み立て規約をそのまま再現するヘルパ
   function judgeWithMelds(
