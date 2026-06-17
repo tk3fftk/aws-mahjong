@@ -163,7 +163,7 @@ function centerSquare(state: GameState): string {
   return `
     <div class="center">
       <div class="center-info">
-        <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</div>
+        <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局${state.honba > 0 ? ` ${state.honba}本場` : ""}</div>
         <div class="wall">山 ${state.wall.length}</div>
         ${state.riichiPot > 0 ? `<div class="pot">供託 ${state.riichiPot}</div>` : ""}
         <div class="dora-row" title="ドラ表示牌">${doraTiles}</div>

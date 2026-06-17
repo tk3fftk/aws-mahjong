@@ -115,35 +115,57 @@ export class GameController {
     return this.#state;
   }
 
-  /** 半荘 (東風戦) を最初から始める。持ち点を 25000 にリセットして東1局を配牌 */
+  /** 半荘 (東風戦) を最初から始める。持ち点を 25000 にリセットして東1局・0本場を配牌 */
   startMatch(): void {
     for (const seat of SEAT_ORDER) {
       this.#state.players[seat].score = INITIAL_SCORE;
     }
     this.#state.riichiPot = 0; // 持ち越し供託をクリアしてから配牌
-    this.#deal(0);
+    this.#deal(0, 0);
   }
 
   /**
-   * 次の局へ進む (win / draw_game からのみ有効)。
-   * AWS麻雀は「親の連荘なし」なので、親の和了・流局を問わず常に親が交代する。
-   * 東4局終了後は phase="round_end" (終局) になり、点数は動かない。
+   * 次の局へ進む (win / draw_game からのみ有効)。連荘ルール (D-011):
+   * - 親が和了 → 連荘 (roundIndex 据え置き)・本場+1
+   * - 子が和了 → 親交代・本場0リセット
+   * - 流局・親テンパイ → 連荘・本場+1 / 親ノーテン → 親交代・本場+1 (引き継ぐ)
+   * 親が北家 (東4局) から連荘せず流れた時点で phase="round_end" (終局)。
    */
   startNextRound(): void {
-    if (this.#state.phase !== "win" && this.#state.phase !== "draw_game") return;
+    const phase = this.#state.phase;
+    if (phase !== "win" && phase !== "draw_game") return;
+
+    let renchan: boolean;
+    let nextHonba: number;
+    if (phase === "win") {
+      const dealerWon = this.#state.players[this.#state.winInfo!.winner].isDealer;
+      renchan = dealerWon;
+      nextHonba = dealerWon ? this.#state.honba + 1 : 0; // 子和了は本場リセット
+    } else {
+      const dealer = SEAT_ORDER[this.#state.roundIndex % SEAT_ORDER.length]!;
+      const d = this.#state.players[dealer];
+      renchan = winningTiles(d.hand, d.melds).length > 0; // 親テンパイなら連荘
+      nextHonba = this.#state.honba + 1; // 流局は親の聴牌に関わらず本場+1
+    }
+
+    if (renchan) {
+      this.#deal(this.#state.roundIndex, nextHonba); // 同じ親・同じ局番で再配牌
+      return;
+    }
+    // 親交代。北家 (東4局) が流れたら終局
     if (this.#state.roundIndex >= ROUNDS_PER_MATCH - 1) {
       this.#state.phase = "round_end";
       this.#emit();
       return;
     }
-    this.#deal(this.#state.roundIndex + 1);
+    this.#deal(this.#state.roundIndex + 1, nextHonba);
   }
 
   /**
    * 局 roundIndex の配牌。親 = SEAT_ORDER[roundIndex] で、piles[0] (14枚) が親に渡り、
    * 自風はツモ順で 1z→4z と回る。親が CPU の場合は #loop で人間の手番まで自動進行する。
    */
-  #deal(roundIndex: number): void {
+  #deal(roundIndex: number, honba: number): void {
     const dealt = dealInitialHands(this.#wallFactory(this.#rng));
     const { liveWall, deadWall } = splitDeadWall(dealt.remainingWall);
     const dealer = SEAT_ORDER[roundIndex % SEAT_ORDER.length]!;
@@ -172,6 +194,7 @@ export class GameController {
       turn: dealer,
       roundWind: "1z",
       roundIndex,
+      honba,
       phase: "discard",
       lastDrawTile: initialDraw,
       lastDiscard: null,
@@ -803,6 +826,7 @@ export class GameController {
       fu,
       isDealer: player.isDealer,
       isTsumo: opts.isTsumo,
+      honba: this.#state.honba, // 連荘の本場分を加算 (ツモ各+100/ロン+300 ×本場)
     });
     const discarder = opts.isTsumo ? null : opts.discarder;
     const deltas = this.#applyPayments(seat, discarder, payments);
@@ -941,6 +965,7 @@ function createInitialState(): GameState {
     turn: "east",
     roundWind: "1z",
     roundIndex: 0,
+    honba: 0,
     phase: "deal",
     lastDrawTile: null,
     lastDiscard: null,

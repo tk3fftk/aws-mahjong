@@ -6,6 +6,7 @@ export interface ScoreInput {
   fu: number;
   isDealer: boolean;
   isTsumo: boolean;
+  honba?: number; // 本場数 (連荘で増える)。省略時 0。ツモは各支払者 +100×本場、ロンは放銃者 +300×本場
 }
 
 /**
@@ -49,13 +50,17 @@ function ceil100(points: number): number {
 
 export function calcScore(input: ScoreInput): ScorePayments {
   const base = basePoints(input.totalHan, input.fu);
+  // 本場ボーナス: 切り上げ後の基本点に加算 (慣例)。ツモは支払者1人あたり 100×本場、ロンは 300×本場。
+  const honba = input.honba ?? 0;
+  const tsumoBonus = 100 * honba;
+  const ronBonus = 300 * honba;
   if (input.isTsumo && input.isDealer) {
-    const fromEachKo = ceil100(base * 2);
+    const fromEachKo = ceil100(base * 2) + tsumoBonus;
     return { kind: "tsumo-dealer", fromEachKo, total: fromEachKo * NUM_KO };
   }
   if (input.isTsumo) {
-    const fromDealer = ceil100(base * 2);
-    const fromEachKo = ceil100(base);
+    const fromDealer = ceil100(base * 2) + tsumoBonus;
+    const fromEachKo = ceil100(base) + tsumoBonus;
     return {
       kind: "tsumo-ko",
       fromDealer,
@@ -63,6 +68,6 @@ export function calcScore(input: ScoreInput): ScorePayments {
       total: fromDealer + fromEachKo * (NUM_KO - 1),
     };
   }
-  const fromDiscarder = ceil100(input.isDealer ? base * 6 : base * 4);
+  const fromDiscarder = ceil100(input.isDealer ? base * 6 : base * 4) + ronBonus;
   return { kind: "ron", fromDiscarder, total: fromDiscarder };
 }
