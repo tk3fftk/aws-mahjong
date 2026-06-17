@@ -28,6 +28,7 @@ When code and docs disagree, treat **the code as the source of truth** and updat
 | `&north=<mpsz>` | North player's 13 tiles |
 | `&wallHead=<mpsz>` | Live wall head (upcoming draws) |
 | `&deadWall=<mpsz>` | Dead wall (dora indicators, ura-dora) |
+| `&scoreEast=<n>` | Override a seat's starting score (`scoreEast/scoreSouth/scoreWest/scoreNorth`). Reproduces 飛び (tobi). |
 
 ### Named presets (`src/debug/presets.ts`)
 
@@ -52,6 +53,11 @@ http://localhost:5173/?debug=bigwin
 # (reveals a kan-dora + draws a rinshan tile); only then does the kan yaku apply.
 # Without declaring, you get the base yaku only (CI/CDパイプライン, 2 han).
 http://localhost:5173/?debug=1&east=678p999p234m567m55s
+
+# 飛び (tobi / bust): a player going below 0 ends the match immediately, regardless of round.
+# South starts at 500; discard 1z (14th tile) → South discards 8m → ロン (dealer ron > 500)
+# → South goes negative → next button becomes 結果発表へ → 終局画面に「飛び終了」と South「(飛び)」。
+http://localhost:5173/?debug=ron&scoreSouth=500
 ```
 
 The debug panel's 待ち/役 preview lists yaku even for non-winnable hands (和了不可・AWS役なし) — useful for checking yaku detection without an AWS yaku. See `src/debug/panel.ts:previewWaitYaku`.

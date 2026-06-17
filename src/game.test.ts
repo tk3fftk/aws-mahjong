@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { GameController } from "./game";
+import { GameController, isBusted } from "./game";
 import { calcScore } from "./score";
 import { mpszToTiles, sortTiles } from "./tiles";
 import { countDoraHan, uraDoraIndicators } from "./dora";
@@ -775,6 +775,44 @@ describe("GameController / 局送り (連荘・本場・終局)", () => {
     game.startNextRound();
     expect(game.state.roundIndex).toBe(0);
     expect(game.state.phase).toBe("discard");
+  });
+});
+
+describe("GameController / 飛び (持ち点マイナスで終局)", () => {
+  // 親 east の即ツモ和了リグ (ツモ精算テストと同じ)。子3人が支払う
+  const TSUMO_RIG: RiggedDeal = { east: "555z234m567m234p55s" };
+
+  it("子が精算で持ち点マイナスになったら局数に関係なく終局 (round_end)", () => {
+    const game = riggedGame(TSUMO_RIG);
+    game.state.players.south.score = 100; // 親ツモを払いきれず飛ぶ
+    expect(game.humanDeclareTsumo().success).toBe(true);
+    expect(game.state.roundIndex).toBe(0); // まだ東1局
+    game.startNextRound();
+    expect(game.state.phase).toBe("round_end"); // 飛び終了
+    expect(game.state.players.south.score).toBeLessThan(0);
+  });
+
+  it("全員プラスなら飛びは起きず通常どおり局が続く", () => {
+    const game = riggedGame(TSUMO_RIG);
+    expect(game.humanDeclareTsumo().success).toBe(true); // 親ツモ → 連荘
+    game.startNextRound();
+    expect(game.state.phase).not.toBe("round_end");
+    expect(game.state.phase).toBe("discard"); // 再配牌され局が続く
+  });
+
+  it("isBusted: 持ち点ちょうど0は飛びではない、負は飛び", () => {
+    const game = riggedGame(TSUMO_RIG);
+    game.state.players.south.score = 0;
+    expect(isBusted(game.state)).toBe(false);
+    game.state.players.south.score = -1;
+    expect(isBusted(game.state)).toBe(true);
+  });
+
+  it("initialScores で開始持ち点を席ごとに上書きできる", () => {
+    const game = new GameController({ initialScores: { south: 500 } });
+    game.startMatch();
+    expect(game.state.players.south.score).toBe(500);
+    expect(game.state.players.east.score).toBe(25000); // 未指定はデフォルト
   });
 });
 

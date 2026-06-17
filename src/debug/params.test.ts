@@ -40,4 +40,14 @@ describe("parseDebugConfig", () => {
     const config = parseDebugConfig("?debug=1&seed=42&foo=bar");
     expect(config).toEqual({ rig: null, presetName: null });
   });
+
+  it("scoreEast/scoreSouth 等で開始持ち点を上書き指定できる", () => {
+    const config = parseDebugConfig("?debug=ron&scoreSouth=500&scoreEast=30000");
+    expect(config?.initialScores).toEqual({ south: 500, east: 30000 });
+  });
+
+  it("score キーがなければ initialScores は付かない", () => {
+    const config = parseDebugConfig("?debug=1");
+    expect(config?.initialScores).toBeUndefined();
+  });
 });

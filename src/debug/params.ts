@@ -1,4 +1,5 @@
 import type { RiggedDeal } from "./rigged";
+import type { Seat } from "../types";
 import { DEBUG_PRESETS } from "./presets";
 
 export interface DebugConfig {
@@ -6,7 +7,17 @@ export interface DebugConfig {
   rig: RiggedDeal | null;
   /** 適用したプリセット名 (panel のフォーム初期値用)。生指定のみなら null */
   presetName: string | null;
+  /** 開始持ち点の上書き (?scoreEast=... 等)。指定キーがなければ undefined。飛びの再現用 */
+  initialScores?: Partial<Record<Seat, number>>;
 }
+
+// URL クエリのキー名 → 席。開始持ち点の上書き用 (?scoreSouth=500 で南家を500点開始)
+const SCORE_KEYS: Record<string, Seat> = {
+  scoreEast: "east",
+  scoreSouth: "south",
+  scoreWest: "west",
+  scoreNorth: "north",
+};
 
 // URL クエリのキー名は RiggedDeal のフィールド名と1対1で対応させる
 const RIG_KEYS = [
@@ -52,5 +63,16 @@ export function parseDebugConfig(search: string): DebugConfig | null {
     if (value !== null && value !== "") rig[key] = value;
   }
   const hasRig = Object.values(rig).some((v) => v !== undefined);
-  return { rig: hasRig ? rig : null, presetName };
+
+  // 開始持ち点の上書き (数値として妥当な scoreXxx のみ採用)
+  let initialScores: Partial<Record<Seat, number>> | undefined;
+  for (const [key, seat] of Object.entries(SCORE_KEYS)) {
+    const raw = params.get(key);
+    if (raw === null || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) continue;
+    (initialScores ??= {})[seat] = n;
+  }
+
+  return { rig: hasRig ? rig : null, presetName, initialScores };
 }
