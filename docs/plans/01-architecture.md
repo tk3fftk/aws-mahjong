@@ -44,7 +44,7 @@ ui/render ──────────────┐
 | `src/winning/decompose.ts` | 「meldCount 面子+1雀頭」の標準形分解 (既定4面子=門前14枚)。全分解を列挙する (役判定で最大 han を選ぶため。刻子分解の裏に隠れる平和形を取りこぼさない) |
 | `src/winning/special.ts` | 七対子・国士無双の特殊形判定 |
 | `src/winning/check.ts` | `canWin(concealed, melds)`: 3形態を統合した入口。副露があれば分解結果にマージして返す (七対子・国士は副露ありで不成立) |
-| `src/winning/melds.ts` | 副露の射影ユーティリティ。`toDecompMeld` (kan→3枚刻子)・`effectiveHandTiles` (実効14枚)・`isMenzenHand` (暗槓のみ=門前) |
+| `src/winning/melds.ts` | 副露の射影ユーティリティ。`toDecompMeld` (kan→3枚刻子, aws-kan→4枚保持)・`effectiveHandTiles` (実効手牌)・`isMenzenHand` (暗槓/aws-kanのみ=門前)。`aws-kan` は AWS役4枚パターン宣言の特殊副露 ([D-017](./04-design-decisions.md#d-017-awsカン宣言メカニクス)) |
 | `src/winning/furiten.ts` | 待ち牌列挙 (`winningTiles`、全34種ブルートフォース) と基本フリテン判定 (`isFuriten`) |
 | `src/claims.ts` | 打牌に対する鳴き/ロンの適格性 (`computeEligibility`) と複数クレームの優先解決 (`resolveClaims`: ロン>カン=ポン>チー、同位は頭ハネ) |
 | `src/yaku/standard.ts` | 標準麻雀の役判定。**5z/6z/7z 刻子はスキップ** (`aws-pattern.ts` 側で扱うため) |

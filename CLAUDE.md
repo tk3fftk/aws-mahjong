@@ -46,6 +46,12 @@ http://localhost:5173/?debug=1&east=33445566778899s
 
 # Kokushi yakuman
 http://localhost:5173/?debug=bigwin
+
+# AWS-kan declaration (D-017): "kan" yaku (cicd-pipeline-kan etc.) are no longer awarded from
+# tile composition alone. With 6789p in hand, the "AWSカン: CI/CDカン" button declares it
+# (reveals a kan-dora + draws a rinshan tile); only then does the kan yaku apply.
+# Without declaring, you get the base yaku only (CI/CDパイプライン, 2 han).
+http://localhost:5173/?debug=1&east=678p999p234m567m55s
 ```
 
 The debug panel's 待ち/役 preview lists yaku even for non-winnable hands (和了不可・AWS役なし) — useful for checking yaku detection without an AWS yaku. See `src/debug/panel.ts:previewWaitYaku`.

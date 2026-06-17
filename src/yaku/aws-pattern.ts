@@ -23,7 +23,18 @@ export const YAKU_LIST: YakuJsonEntry[] = (yakuData as YakuJsonShape).yakus;
 
 export interface AwsPatternContext {
   isMenzen: boolean;
+  // 宣言された AWSカン副露に対応する役 ID。これらは牌構成ではなく宣言の有無で付与する。
+  declaredAwsKanYakuIds?: string[];
 }
+
+// AWSカン宣言で初めて成立する「カン」系役。牌構成からは自動検出しない (宣言ゲート化)。
+export const AWS_KAN_YAKU_IDS: ReadonlySet<string> = new Set([
+  "cicd-pipeline-kan",
+  "web-application-kan",
+  "blue-green-deploy-kan",
+]);
+
+const YAKU_BY_ID = new Map(YAKU_LIST.map((e) => [e.id, e]));
 
 /**
  * 与えられた和了形に対し、yaku.json の AWS固有役のうち成立するものを返す。
@@ -33,6 +44,9 @@ export interface AwsPatternContext {
  * AWS固有役どうしは原則として重複加算可。
  * 標準対応との衝突 (kiro/cost-explorer/iam ↔ 白/發/中) は `standard.ts` 側で
  * 5z/6z/7z 刻子の役牌判定をスキップすることで回避済み。
+ *
+ * カン系役 (AWS_KAN_YAKU_IDS) は牌構成からは検出せず、ctx.declaredAwsKanYakuIds
+ * (宣言された AWSカン) に含まれるものだけを付与する。
  */
 export function detectAwsYakus(
   handTiles: TileId[],
@@ -45,6 +59,8 @@ export function detectAwsYakus(
   for (const entry of YAKU_LIST) {
     const kind = AWS_YAKU_KIND[entry.id];
     if (!kind) continue;
+    // カン系役は宣言ベース。牌構成照合からは除外する
+    if (AWS_KAN_YAKU_IDS.has(entry.id)) continue;
 
     if (!matchesAny(entry, kind, handCounts, winForm)) continue;
 
@@ -54,7 +70,51 @@ export function detectAwsYakus(
     results.push({ id: entry.id, name: entry.name, han });
   }
 
+  // 宣言された AWSカン役を付与 (重複排除)。menzen/hanOpen を尊重する
+  for (const id of new Set(ctx.declaredAwsKanYakuIds ?? [])) {
+    const entry = YAKU_BY_ID.get(id);
+    if (!entry || !AWS_KAN_YAKU_IDS.has(id)) continue;
+    if (!ctx.isMenzen && entry.hanOpen === null) continue;
+    const han = ctx.isMenzen ? entry.han : entry.hanOpen!;
+    results.push({ id: entry.id, name: entry.name, han });
+  }
+
   return resolveAwsSubsumption(results);
+}
+
+/**
+ * AWSカン副露の4枚が、どのカン系役 (AWS_KAN_YAKU_IDS) のサンプルに一致するかを返す。
+ * variant を含めて照合 (例: web-application-kan は 3p2m7s9s / 3p3m7s9s)。不一致は null。
+ */
+export function awsKanYakuIdForTiles(tiles: TileId[]): string | null {
+  const counts = counts34(tiles);
+  for (const id of AWS_KAN_YAKU_IDS) {
+    const entry = YAKU_BY_ID.get(id);
+    if (!entry) continue;
+    for (const sample of entry.sampleMpszList ?? []) {
+      if (matchesCountSuperset(counts, sample)) return id;
+    }
+  }
+  return null;
+}
+
+/** 手牌にカン系役の全構成牌がそろっている候補を列挙する (AWSカン宣言の選択肢用)。 */
+export function detectAwsKanCandidates(
+  handTiles: TileId[],
+): Array<{ yakuId: string; tileIds: TileId[] }> {
+  const counts = counts34(handTiles);
+  const out: Array<{ yakuId: string; tileIds: TileId[] }> = [];
+  for (const id of AWS_KAN_YAKU_IDS) {
+    const entry = YAKU_BY_ID.get(id);
+    if (!entry) continue;
+    for (const sample of entry.sampleMpszList ?? []) {
+      if (matchesCountSuperset(counts, sample)) {
+        out.push({ yakuId: id, tileIds: mpszToTiles(sample) });
+        break; // 同一役は最初に一致した variant のみ
+      }
+    }
+  }
+  return out;
 }
 
 /**

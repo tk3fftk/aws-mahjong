@@ -4,7 +4,7 @@ import { YAKUMAN_HAN_THRESHOLD } from "../score";
 import { SEVEN_PAIRS_FU, calcFu, enumerateWinPlacements } from "../fu";
 import { decomposeStandard } from "../winning/decompose";
 import { judgeStandardYakus, type YakuContext } from "./standard";
-import { detectAwsYakus } from "./aws-pattern";
+import { awsKanYakuIdForTiles, detectAwsYakus } from "./aws-pattern";
 import { isAwsYakuId } from "./aws-classification";
 
 export interface JudgeResult {
@@ -44,6 +44,11 @@ export function judgeYaku(
   ctx: JudgeContext,
 ): JudgeResult {
   const tileIds = hand.map((t) => t.id);
+  // 宣言された AWSカン副露 → 対応するカン系役 ID。これらは宣言の有無で付与する
+  const declaredAwsKanYakuIds = ctx.melds
+    .filter((m) => m.kind === "aws-kan")
+    .map((m) => awsKanYakuIdForTiles(m.tiles.map((t) => t.id)))
+    .filter((id): id is string => id !== null);
 
   if (winForm.kind === "thirteen-orphans") {
     const yakus: YakuResult[] = [
@@ -86,7 +91,7 @@ export function judgeYaku(
       }
     }
     // AWS固有役 (dr-architecture など 七対子型)
-    const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
+    const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen, declaredAwsKanYakuIds });
     yakus.push(...awsYakus);
     yakus.push(...riichiYakus(ctx));
     return finalize(yakus, SEVEN_PAIRS_FU);
@@ -102,7 +107,7 @@ export function judgeYaku(
     roundWind: ctx.roundWind,
   };
   // AWS固有役は牌の multiset のみで決まり分解非依存 → ループ外で一度だけ判定
-  const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen });
+  const awsYakus = detectAwsYakus(tileIds, winForm, { isMenzen: ctx.isMenzen, declaredAwsKanYakuIds });
   // 反復系AWS役(冗長化/AWS三暗刻)が立つ手では標準の一盃口/二盃口を複合させない (yaku.json 参照)。
   // これらは AWS役なので awsYakus 側にのみ現れ、分解・配置に依存しない。三暗刻の手では
   // 冗長化が subsumption で抑制され awsYakus から消えるため、両IDを見て判定する。

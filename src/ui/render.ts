@@ -2,6 +2,7 @@ import type { CalledMeld, GameState, Player, Seat, WinInfo } from "../types";
 import { renderTile, renderTileById } from "./tile-view";
 import { openYakuHelp } from "./yaku-help";
 import { doraIndicators, MAX_DORA_INDICATORS } from "../dora";
+import { YAKU_LIST } from "../yaku/aws-pattern";
 
 export interface RenderHandlers {
   // 手牌クリック: 1回目で選択、選択済み牌の再クリックで捨てる (main.ts 側で判定)
@@ -65,7 +66,11 @@ const MELD_LABEL: Record<CalledMeld["kind"], string> = {
   minkan: "カン",
   ankan: "暗カン",
   kakan: "加カン",
+  "aws-kan": "AWSカン",
 };
+
+// AWSカン宣言ボタン用: 役 ID → 表示名
+const AWS_KAN_NAME = new Map(YAKU_LIST.map((e) => [e.id, e.name]));
 
 // 手番ハイライト: 打牌待ちのプレイヤーだけ光らせる
 function isActiveSeat(state: GameState, seat: Seat): boolean {
@@ -291,13 +296,24 @@ function actionsHtml(state: GameState, ui: UiState): string {
   const canTsumo = isMyTurn && state.canTsumo;
   const selfKanButtons = isMyTurn
     ? state.selfKanOptions
-        .map(
-          (opt, i) => `
+        .map((opt, i) => {
+          if (opt.kind === "aws-kan") {
+            const name = AWS_KAN_NAME.get(opt.yakuId) ?? "AWSカン";
+            const tiles = opt.tileIds
+              .map((id) => renderTileById(id, { variant: "discard" }))
+              .join("");
+            return `
+            <button data-action="self-kan" data-kan="${i}">
+              AWSカン: ${name}
+              ${tiles}
+            </button>`;
+          }
+          return `
             <button data-action="self-kan" data-kan="${i}">
               ${opt.kind === "ankan" ? "暗カン" : "加カン"}
               ${renderTileById(opt.tileId, { variant: "discard" })}
-            </button>`,
-        )
+            </button>`;
+        })
         .join("")
     : "";
   // リーチボタン: 宣言可能な打牌があるときだけ表示。armed 中は押下状態を示す

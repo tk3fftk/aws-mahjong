@@ -252,3 +252,18 @@
   - ロジック無改修 (`game.ts`/`cpu.ts`/`winning/*` 不変) のため既存テストは緑のまま。本変更は DOM/起動レベルで vitest の `node` 環境 (jsdom なし) では自動テスト対象外 → CLAUDE.md どおり人間がブラウザ確認
   - 動作確認は DevTools コンソールから例外注入で行う: `window.dispatchEvent(new ErrorEvent("error", { error: new Error("test") }))` / `Promise.reject(new Error("test"))` → フォールバック描画。**AZ障害パターンは 2026-06 人間がブラウザで確認済み**。リージョン障害は起動不能時のみで通常踏まないが描画経路は同じ `renderFatal`
   - `#app` 不在 (`main.ts:9` の throw) と `parseDebugConfig` の既存 try/catch は対象外 (前者は復旧不能、後者は専用 catch 済み)
+
+## D-017: AWSカン宣言メカニクス
+
+- **What**: 「カン」と名の付く3役 (`cicd-pipeline-kan`=6789p / `web-application-kan`=3p2m7s9s / `blue-green-deploy-kan`=3p3m6m7s) を、牌構成の自動成立から**プレイヤーの宣言で成立**へ変更 (2026-06、ユーザー要望)。新副露種別 `aws-kan` を導入:
+  - **宣言フロー**: 自分の手番 (ツモ直後) に手牌へ4枚パターンがそろうと `#computeSelfKanOptions` が `{kind:"aws-kan", yakuId, tileIds}` を提示。`#performSelfKan` が該当4枚を抜いて `aws-kan` 副露として晒し、通常カン同様 **カンドラ1枚公開 (`#revealKanDora`) + 嶺上ツモ (`#drawRinshan`)** を行う。打牌からの鳴きカン (daiminkan 相当)・槍槓は未対応 (スコープ外)
+  - **算術**: `aws-kan` は1面子枠を占有 (`check.ts: concealedMeldCount = 4 - melds.length`)。残り手牌は通常通り分解されるので `decompose.ts` の `14=4×3+2` は無改修。本物の槓 (4枚→1面子+補充) と同じ収支
+  - **多色OK**: チー/ポン形を要求しない独立種別なので `3p2m7s9s` など3色パターンも晒せる (既存メルド型に押し込まないのが鍵)
+  - **メンゼン保持**: 暗槓同様、自分の手牌から晒す宣言なので `isMenzenHand` で門前扱い (門前3飜 / 他で鳴いていれば hanOpen=2、blue-green は門前限定)
+  - **役の付与**: `detectAwsYakus` は `AWS_KAN_YAKU_IDS` を牌構成照合から除外し、`ctx.declaredAwsKanYakuIds` (= `judge.ts` が `aws-kan` 副露を `awsKanYakuIdForTiles` で変換) のみ付与。宣言で晒した4枚は `effectiveHandTiles` 経由で下位役 (789p 等) を誘発するため `resolveAwsSubsumption` で抑制 (D 既存の subsumption と整合)
+  - **符**: `aws-kan` は刻子でないため `fu.ts:calcFu` の `pon` 限定ループで自然に **0符寄与**。`partitionMelds`/`enumerateWinPlacements` は非 null 種別として和了牌配置から除外。fu.ts/standard.ts はロジック無改修 (型のみ追従)
+- **Why**: 「カン」役が何の操作もなく牌構成だけで付くのは名前と挙動が乖離していた。`hanOpen=2` は食い下がりであって鳴き必須の意ではない (cicd は順子=チー可) と判明したが、ユーザーが「カンらしく宣言を要求する」遊びを選択。原作 (rule.html/yaku.json は最終手検出) からは**意図的に乖離するハウスルール拡張**
+- **Consequences**:
+  - CPU は v1 では AWSカンを宣言しない (`#computeSelfKanOptions` の結果から CPU 経路は `kind==="ankan"` のみ拾う)。CPU が誤って手を壊すのを避ける最小実装。将来「宣言後もテンパイを保つ場合のみ」等のヒューリスティックで有効化余地
+  - 宣言しないと下位役のみ (6789p を持っていても `cicd-pipeline` 2飜だけ)。debug URL の旧 6789p 例は base のみ成立に
+  - 検証: `aws-pattern.test.ts` (宣言ゲート/補助関数)・`judge.test.ts` (宣言→役+符)・`game.test.ts` (宣言フロー: 牌除去/カンドラ+1/嶺上ツモ)。UI 表示と実機操作は CLAUDE.md どおり人間がブラウザ確認

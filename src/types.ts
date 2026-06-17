@@ -70,11 +70,11 @@ export interface ClaimState {
   cpuClaim: CpuClaim | null; // 人間がパスしたら実行する CPU 側最優先クレーム
 }
 
-// 自分の手番中に宣言できるカン
-export interface SelfKanOption {
-  kind: "ankan" | "kakan";
-  tileId: TileId;
-}
+// 自分の手番中に宣言できるカン (ankan/kakan は通常の槓、aws-kan は AWS役4枚パターンの宣言)
+export type SelfKanOption =
+  | { kind: "ankan"; tileId: TileId }
+  | { kind: "kakan"; tileId: TileId }
+  | { kind: "aws-kan"; yakuId: string; tileIds: TileId[] };
 
 export interface GameState {
   wall: Tile[]; // ライブ壁 (配牌後 69枚)。0 で流局
@@ -98,19 +98,21 @@ export interface GameState {
   riichiCandidates: number[]; // 人間が今リーチ宣言できる打牌 index (不可なら空)。UI のボタン活性 + 牌ハイライト用
 }
 
-export type MeldKind = "chi" | "pon" | "pair";
+// aws-kan = AWS役の4枚パターン (6789p 等) を宣言した特殊面子。チー/ポン形ではない4枚を1面子枠で扱う。
+export type MeldKind = "chi" | "pon" | "pair" | "aws-kan";
 export interface Meld {
   kind: MeldKind;
   tiles: TileId[];
 }
 
 // 卓上に晒した副露。分解結果の Meld (chi|pon|pair) とは語彙が違うため別型にする。
-export type CalledMeldKind = "chi" | "pon" | "minkan" | "ankan" | "kakan";
+export type CalledMeldKind = "chi" | "pon" | "minkan" | "ankan" | "kakan" | "aws-kan";
 export interface CalledMeld {
   kind: CalledMeldKind;
-  tiles: Tile[]; // chi/pon=3枚, kan系=4枚 (鳴いた牌を含む)
-  calledFrom: Seat | null; // 打牌者。ankan は null (kakan は元ポンの相手)
-  calledTile: Tile | null; // 鳴いた牌 (UI ハイライト用)。ankan は null
+  tiles: Tile[]; // chi/pon=3枚, kan系=4枚 (鳴いた牌を含む), aws-kan=4枚 (AWSパターン)
+  calledFrom: Seat | null; // 打牌者。ankan/aws-kan は null (kakan は元ポンの相手)
+  calledTile: Tile | null; // 鳴いた牌 (UI ハイライト用)。ankan/aws-kan は null
+  awsYakuId?: string; // aws-kan のとき、対応する AWS役 ID (cicd-pipeline-kan 等)
 }
 
 // winning/ 層は副露の出所に依存しないよう構造的部分型で受ける

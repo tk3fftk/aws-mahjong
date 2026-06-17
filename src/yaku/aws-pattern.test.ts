@@ -1,11 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { detectAwsYakus } from "./aws-pattern";
+import {
+  awsKanYakuIdForTiles,
+  detectAwsKanCandidates,
+  detectAwsYakus,
+} from "./aws-pattern";
 import { decomposeStandard } from "../winning/decompose";
 import { isSevenPairs, sevenPairsTiles } from "../winning/special";
 import { mpszToTiles } from "../tiles";
 import type { WinForm } from "../types";
 
-function detectFromMpsz(mpsz: string, opts: { isMenzen?: boolean } = {}) {
+function detectFromMpsz(
+  mpsz: string,
+  opts: { isMenzen?: boolean; declaredAwsKanYakuIds?: string[] } = {},
+) {
   const tiles = mpszToTiles(mpsz);
   let winForm: WinForm;
   if (isSevenPairs(tiles)) {
@@ -15,7 +22,10 @@ function detectFromMpsz(mpsz: string, opts: { isMenzen?: boolean } = {}) {
     if (decomps.length === 0) throw new Error("not decomposable: " + mpsz);
     winForm = { kind: "standard", decompositions: decomps };
   }
-  return detectAwsYakus(tiles, winForm, { isMenzen: opts.isMenzen ?? true });
+  return detectAwsYakus(tiles, winForm, {
+    isMenzen: opts.isMenzen ?? true,
+    declaredAwsKanYakuIds: opts.declaredAwsKanYakuIds,
+  });
 }
 
 describe("detectAwsYakus / completed-meld 分類", () => {
@@ -130,38 +140,51 @@ describe("detectAwsYakus / isCombineAllowed", () => {
   });
 });
 
-describe("detectAwsYakus / 強制共立の整理 (subsumption)", () => {
-  // 上位役のサンプル牌が下位役を完全包含するペアは、上位が立つと下位が必ず自動成立する。
-  // 同一構造の二重計上になるため下位役を抑制し、上位役のみ採用する。
+describe("detectAwsYakus / AWSカン宣言ゲート", () => {
+  // カン系役は牌構成では成立せず、AWSカン宣言 (declaredAwsKanYakuIds) があるときのみ付与する。
 
-  it("CI/CDカン(6789p) が立つと CI/CDパイプライン(789p) は抑制される (門前 3飜のみ)", () => {
-    // 678p + 999p で 6789p を含む。789p も不可避に含むが、カンに吸収される。
+  it("宣言なし: 6789p を含む手でも CI/CDカンは付かず、CI/CDパイプライン(2飜)のみ", () => {
     const yakus = detectFromMpsz("678p999p234m567m55s");
+    expect(yakus.find((y) => y.id === "cicd-pipeline-kan")).toBeUndefined();
+    expect(yakus.find((y) => y.id === "cicd-pipeline")?.han).toBe(2);
+  });
+
+  it("宣言あり: CI/CDカン宣言で 3飜成立、下位の CI/CDパイプラインは subsumption で抑制", () => {
+    const yakus = detectFromMpsz("678p999p234m567m55s", {
+      declaredAwsKanYakuIds: ["cicd-pipeline-kan"],
+    });
     expect(yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(3);
     expect(yakus.find((y) => y.id === "cicd-pipeline")).toBeUndefined();
   });
 
-  it("CI/CDカン: 鳴き手でも パイプラインは抑制され カン(hanOpen=2)のみ", () => {
-    const yakus = detectFromMpsz("678p999p234m567m55s", { isMenzen: false });
+  it("宣言あり (鳴き手): CI/CDカンは hanOpen=2、パイプラインは抑制", () => {
+    const yakus = detectFromMpsz("678p999p234m567m55s", {
+      isMenzen: false,
+      declaredAwsKanYakuIds: ["cicd-pipeline-kan"],
+    });
     expect(yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(2);
     expect(yakus.find((y) => y.id === "cicd-pipeline")).toBeUndefined();
   });
 
-  it("Webアプリ カン(3p2m7s9s) が立つと Webアプリ・インメモリキャッシュは抑制される", () => {
-    // 3p,2m,7s,9s をすべて含む (123p→3p, 123m→2m, 789s→7s,9s)。
-    const yakus = detectFromMpsz("123p456p123m789s99m");
+  it("宣言あり: Webアプリ カンで Webアプリ・インメモリキャッシュを抑制", () => {
+    const yakus = detectFromMpsz("123p456p123m789s99m", {
+      declaredAwsKanYakuIds: ["web-application-kan"],
+    });
     expect(yakus.find((y) => y.id === "web-application-kan")?.han).toBe(3);
     expect(yakus.find((y) => y.id === "web-application")).toBeUndefined();
     expect(yakus.find((y) => y.id === "in-memory-cache")).toBeUndefined();
   });
 
-  it("Blue/Greenデプロイ カン(3p3m6m7s) が立つと Webアプリは抑制される", () => {
-    // 3p(123p), 3m(345m), 6m(678m), 7s(678s) を含む。9s は無いので in-memory は無関係。
-    const yakus = detectFromMpsz("11p123p345m678m678s");
+  it("宣言あり: Blue/Greenデプロイ カンで Webアプリを抑制", () => {
+    const yakus = detectFromMpsz("11p123p345m678m678s", {
+      declaredAwsKanYakuIds: ["blue-green-deploy-kan"],
+    });
     expect(yakus.find((y) => y.id === "blue-green-deploy-kan")?.han).toBe(3);
     expect(yakus.find((y) => y.id === "web-application")).toBeUndefined();
   });
+});
 
+describe("detectAwsYakus / 強制共立の整理 (subsumption: 反復系)", () => {
   it("冗長化: Webアプリを ×2 に引き上げ (web-application 2飜 + 冗長化 3飜 = 5飜相当)", () => {
     const yakus = detectFromMpsz("234p234p234m234m77s");
     expect(yakus.find((y) => y.id === "redundancy")?.han).toBe(3);
@@ -190,5 +213,37 @@ describe("detectAwsYakus / 強制共立の整理 (subsumption)", () => {
     expect(yakus.find((y) => y.id === "web-application")?.han).toBe(1);
     expect(yakus.find((y) => y.id === "web-application-kan")).toBeUndefined();
     expect(yakus.find((y) => y.id === "redundancy")).toBeUndefined();
+  });
+});
+
+describe("awsKanYakuIdForTiles", () => {
+  it("6789p → cicd-pipeline-kan", () => {
+    expect(awsKanYakuIdForTiles(mpszToTiles("6789p"))).toBe("cicd-pipeline-kan");
+  });
+  it("3p2m7s9s → web-application-kan (variant)", () => {
+    expect(awsKanYakuIdForTiles(mpszToTiles("3p2m7s9s"))).toBe("web-application-kan");
+  });
+  it("3p3m7s9s → web-application-kan (もう一方の variant)", () => {
+    expect(awsKanYakuIdForTiles(mpszToTiles("3p3m7s9s"))).toBe("web-application-kan");
+  });
+  it("3p3m6m7s → blue-green-deploy-kan", () => {
+    expect(awsKanYakuIdForTiles(mpszToTiles("3p3m6m7s"))).toBe("blue-green-deploy-kan");
+  });
+  it("カンパターンに一致しない4枚は null", () => {
+    expect(awsKanYakuIdForTiles(mpszToTiles("123m4p"))).toBeNull();
+  });
+});
+
+describe("detectAwsKanCandidates", () => {
+  it("手牌に 6789p がそろうと cicd-pipeline-kan 候補を返す", () => {
+    const cands = detectAwsKanCandidates(mpszToTiles("678p999p234m567m55s"));
+    const cicd = cands.find((c) => c.yakuId === "cicd-pipeline-kan");
+    expect(cicd).toBeTruthy();
+    expect([...cicd!.tileIds].sort()).toEqual(["6p", "7p", "8p", "9p"]);
+  });
+  it("構成牌が欠ける手では候補を返さない", () => {
+    // 789p はあるが 6p が無い → cicd-pipeline-kan 候補なし
+    const cands = detectAwsKanCandidates(mpszToTiles("789p234m567m234s55z"));
+    expect(cands.find((c) => c.yakuId === "cicd-pipeline-kan")).toBeUndefined();
   });
 });
