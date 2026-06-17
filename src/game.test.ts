@@ -473,6 +473,38 @@ describe("GameController / カン", () => {
     expect(s.lastDrawTile).not.toBeNull();
   });
 
+  it("AWSカン: 手牌の6789pを宣言するとカンドラ+1・リンシャンツモ・aws-kan副露", () => {
+    const game = riggedGame({
+      east: "678p999p234m567m55s", // 6789p (6p7p8p9p) を含む
+    });
+    // ankan/kakan は無く、AWSカン候補のみ
+    const opt = game.state.selfKanOptions.find((o) => o.kind === "aws-kan");
+    expect(opt).toBeTruthy();
+    expect(opt).toMatchObject({ kind: "aws-kan", yakuId: "cicd-pipeline-kan" });
+
+    const wallBefore = game.state.wall.length; // 69
+    const doraBefore = game.state.doraIndicatorCount; // 1
+    const idx = game.state.selfKanOptions.indexOf(opt!);
+
+    const result = game.humanSelfKan(idx);
+    expect(result.success).toBe(true);
+    const s = game.state;
+    const meld = s.players.east.melds[0]!;
+    expect(meld.kind).toBe("aws-kan");
+    expect(meld.awsYakuId).toBe("cicd-pipeline-kan");
+    expect(meld.calledFrom).toBeNull();
+    expect(meld.tiles.map((t) => t.id)).toEqual(["6p", "7p", "8p", "9p"]);
+    // カンドラ+1、リンシャンは山末尾から、王牌14枚維持
+    expect(s.doraIndicatorCount).toBe(doraBefore + 1);
+    expect(s.wall).toHaveLength(wallBefore - 1);
+    expect(s.deadWall).toHaveLength(14);
+    // 14 - 4 + 1(リンシャン) = 11枚で打牌待ち
+    expect(s.players.east.hand).toHaveLength(11);
+    expect(s.turn).toBe("east");
+    expect(s.phase).toBe("discard");
+    expect(s.lastDrawTile).not.toBeNull();
+  });
+
   it("明槓: claim から宣言してリンシャンツモする", () => {
     const game = riggedGame({
       east: "1m1m1m2p3p4p2s3s4s9p9p1z2z9s", // 1m×3 持ち。初ツモ 9s を捨てる

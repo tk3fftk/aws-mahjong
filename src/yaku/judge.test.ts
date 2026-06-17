@@ -166,6 +166,90 @@ describe("judgeYaku / 二盃口", () => {
   });
 });
 
+describe("judgeYaku / AWSカン宣言ゲート", () => {
+  it("宣言なし: 6789p を含む手は CI/CDカンが付かず CI/CDパイプライン(2飜)のみ", () => {
+    const hand = toHand("678p999p234m567m55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "cicd-pipeline-kan")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "cicd-pipeline")?.han).toBe(2);
+  });
+
+  it("AWSカン宣言: CI/CDカン手は3飜成立し CI/CDパイプラインを抑制", () => {
+    // concealed 11枚 (3面子+雀頭) + AWSカン副露 6789p (1面子枠)
+    const concealed = toHand("234m567m234s55z");
+    const melds: MeldLike[] = [meld("aws-kan", "6789p")];
+    const winForm = canWin(concealed, melds)!;
+    expect(winForm).toBeTruthy();
+    const result = judgeYaku(winForm, effectiveHandTiles(concealed, melds), {
+      isTsumo: true,
+      isMenzen: isMenzenHand(melds),
+      seatWind: "1z",
+      roundWind: "1z",
+      winningTileId: null,
+      melds,
+    });
+    expect(result.yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(3);
+    expect(result.yakus.find((y) => y.id === "cicd-pipeline")).toBeUndefined();
+  });
+
+  it("AWSカン手の符計算: aws-kan は刻子ではないので符0寄与、fu は算出される", () => {
+    const concealed = toHand("234m567m234s55z");
+    const melds: MeldLike[] = [meld("aws-kan", "6789p")];
+    const winForm = canWin(concealed, melds)!;
+    const result = judgeYaku(winForm, effectiveHandTiles(concealed, melds), {
+      isTsumo: true,
+      isMenzen: isMenzenHand(melds),
+      seatWind: "1z",
+      roundWind: "1z",
+      winningTileId: "2m", // 234m に含まれる和了牌 → 符計算経路を通す
+      melds,
+    });
+    expect(result.yakus.find((y) => y.id === "cicd-pipeline-kan")?.han).toBe(3);
+    expect(typeof result.fu).toBe("number");
+    expect(result.fu).toBeGreaterThan(0);
+  });
+
+  it("AWSカンは暗槓同様メンゼンを保つ (門前清自摸和が複合)", () => {
+    const concealed = toHand("234m567m234s55z");
+    const melds: MeldLike[] = [meld("aws-kan", "6789p")];
+    const winForm = canWin(concealed, melds)!;
+    const result = judgeYaku(winForm, effectiveHandTiles(concealed, melds), {
+      isTsumo: true,
+      isMenzen: isMenzenHand(melds),
+      seatWind: "1z",
+      roundWind: "1z",
+      winningTileId: null,
+      melds,
+    });
+    expect(result.yakus.find((y) => y.id === "menzen-tsumo")).toBeTruthy();
+  });
+});
+
+describe("judgeYaku / AWS役 強制共立の整理 (反復系)", () => {
+  it("冗長化手: Webアプリ×2(2飜)+冗長化(3飜)、標準の二盃口は抑制される", () => {
+    // 234p234p234m234m77s は標準形では二盃口でもあるが、AWS一盃口(冗長化)と複合させない。
+    const hand = toHand("234p234p234m234m77s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "redundancy")?.han).toBe(3);
+    expect(result.yakus.find((y) => y.id === "web-application")?.han).toBe(2);
+    expect(result.yakus.find((y) => y.id === "ryanpeikou")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "iipeiko")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "master-replica")).toBeUndefined();
+  });
+
+  it("AWS三暗刻手: Webアプリ×3(3飜)+三暗刻(3飜)、冗長化・マスターレプリカは抑制", () => {
+    const hand = toHand("333p222m777s234p55s");
+    const winForm = canWin(hand)!;
+    const result = judgeYaku(winForm, hand, baseCtx);
+    expect(result.yakus.find((y) => y.id === "aws-three-concealed-triples1")?.han).toBe(3);
+    expect(result.yakus.find((y) => y.id === "web-application")?.han).toBe(3);
+    expect(result.yakus.find((y) => y.id === "redundancy")).toBeUndefined();
+    expect(result.yakus.find((y) => y.id === "master-replica")).toBeUndefined();
+  });
+});
+
 describe("judgeYaku / 副露あり (鳴き手の統合シナリオ)", () => {
   // ゲーム層の組み立て規約をそのまま再現するヘルパ
   function judgeWithMelds(

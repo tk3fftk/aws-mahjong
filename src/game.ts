@@ -23,6 +23,7 @@ import {
 import { canWin } from "./winning/check";
 import { effectiveHandTiles, isMenzenHand } from "./winning/melds";
 import { judgeYaku, canDeclareWin } from "./yaku/judge";
+import { detectAwsKanCandidates } from "./yaku/aws-pattern";
 import { decideCpuAction, decideClaim, PERSONALITIES, type PersonalityId } from "./cpu";
 import { CLAIM_PRIORITY, computeEligibility, resolveClaims, seatDistance } from "./claims";
 import { calcScore, type ScorePayments } from "./score";
@@ -589,14 +590,14 @@ export class GameController {
 
   // ---- 内部: カン ----
 
-  /** 暗槓/加槓の実行 + リンシャンツモ */
+  /** 暗槓/加槓/AWSカンの実行 + リンシャンツモ */
   #performSelfKan(seat: Seat, opt: SelfKanOption): void {
     const player = this.#state.players[seat];
     if (opt.kind === "ankan") {
       const tiles = player.hand.filter((t) => t.id === opt.tileId);
       player.hand = player.hand.filter((t) => t.id !== opt.tileId);
       player.melds.push({ kind: "ankan", tiles, calledFrom: null, calledTile: null });
-    } else {
+    } else if (opt.kind === "kakan") {
       const meldIdx = player.melds.findIndex(
         (m) => m.kind === "pon" && m.tiles[0]!.id === opt.tileId,
       );
@@ -611,6 +612,24 @@ export class GameController {
         calledFrom: pon.calledFrom,
         calledTile: pon.calledTile,
       };
+    } else {
+      // aws-kan: AWSパターンの構成牌を各1枚ずつ手牌から抜いて晒す (暗槓同様メンゼンを保つ)
+      const tiles: Tile[] = [];
+      let remaining = player.hand;
+      for (const id of opt.tileIds) {
+        const idx = remaining.findIndex((t) => t.id === id);
+        if (idx === -1) continue;
+        tiles.push(remaining[idx]!);
+        remaining = remaining.filter((_, i) => i !== idx);
+      }
+      player.hand = remaining;
+      player.melds.push({
+        kind: "aws-kan",
+        tiles,
+        calledFrom: null,
+        calledTile: null,
+        awsYakuId: opt.yakuId,
+      });
     }
     this.#revealKanDora();
     this.#drawRinshan(seat);
@@ -722,6 +741,10 @@ export class GameController {
       if (meld.kind === "pon" && counts.has(meld.tiles[0]!.id)) {
         options.push({ kind: "kakan", tileId: meld.tiles[0]!.id });
       }
+    }
+    // AWSカン: 手牌にカン系役の構成牌4枚がそろっていれば宣言可能
+    for (const cand of detectAwsKanCandidates(player.hand.map((t) => t.id))) {
+      options.push({ kind: "aws-kan", yakuId: cand.yakuId, tileIds: cand.tileIds });
     }
     return options;
   }
