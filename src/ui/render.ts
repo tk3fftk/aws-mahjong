@@ -1,9 +1,24 @@
-import type { CalledMeld, GameState, Player, Seat, WinInfo } from "../types";
+import type { CalledMeld, GameState, Player, Seat, Tile, TileId, WinInfo } from "../types";
 import { renderTile, renderTileById } from "./tile-view";
 import { openYakuHelp } from "./yaku-help";
-import { doraIndicators, MAX_DORA_INDICATORS } from "../dora";
+import { doraIndicators, MAX_DORA_INDICATORS, nextTile } from "../dora";
 import { YAKU_LIST } from "../yaku/aws-pattern";
 import { isBusted } from "../game";
+
+/**
+ * 現在公開されている表ドラ表示牌から「実際のドラ牌ID」の集合を作る。
+ * 盤面の手牌/河/副露で ★ バッジ表示に使う (表示牌そのものはドラではない)。
+ */
+export function currentDoraIds(state: {
+  deadWall: Tile[];
+  doraIndicatorCount: number;
+}): Set<TileId> {
+  const ids = new Set<TileId>();
+  for (const ind of doraIndicators(state.deadWall, state.doraIndicatorCount)) {
+    ids.add(nextTile(ind.id));
+  }
+  return ids;
+}
 
 export interface RenderHandlers {
   // 手牌クリック: 1回目で選択、選択済み牌の再クリックで捨てる (main.ts 側で判定)
@@ -132,7 +147,7 @@ function opponentZone(state: GameState, seat: Seat, pos: "top" | "left" | "right
         ${riverHtml(state, player)}
         <div class="opp-meta">
           <div class="hand-backs">${backs}</div>
-          ${meldsRow(player)}
+          ${meldsRow(player, currentDoraIds(state))}
         </div>
       </div>
     </div>
@@ -178,6 +193,7 @@ function handArea(state: GameState, ui: UiState): string {
   const east = state.players.east;
   const isMyTurn = state.turn === "east" && state.phase === "discard";
   const armed = ui.riichiArmed && state.riichiCandidates.length > 0;
+  const doraIds = currentDoraIds(state);
   // ツモ牌は手動並び替えで位置が変わりうるので、位置ではなく参照等価で判定する。
   // (game.ts は同一 Tile オブジェクトを hand と lastDrawTile の両方に格納している)
   const handHtml = east.hand
@@ -198,6 +214,7 @@ function handArea(state: GameState, ui: UiState): string {
         index: i,
         highlight: isDrawn,
         selected: i === ui.selectedHandIndex,
+        dora: doraIds.has(t.id),
         extraClass: [isSeparated ? "draw-separated" : "", riichiClass ?? ""]
           .filter(Boolean)
           .join(" ") || undefined,
@@ -209,13 +226,13 @@ function handArea(state: GameState, ui: UiState): string {
       ${actionsHtml(state, ui)}
       <div class="hand-bar">
         <div class="hand-row">${handHtml}</div>
-        ${meldsRow(east, "human-melds")}
+        ${meldsRow(east, doraIds, "human-melds")}
       </div>
     </div>
   `;
 }
 
-function meldsRow(player: Player, extraClass = ""): string {
+function meldsRow(player: Player, doraIds: Set<TileId>, extraClass = ""): string {
   if (player.melds.length === 0) return "";
   const melds = player.melds
     .map((meld) => {
@@ -229,7 +246,11 @@ function meldsRow(player: Player, extraClass = ""): string {
             meld.calledTile !== null &&
             t.id === meld.calledTile.id &&
             t.copy === meld.calledTile.copy;
-          return renderTile(t, { variant: "discard", extraClass: isClaimed ? "claimed" : "" });
+          return renderTile(t, {
+            variant: "discard",
+            dora: doraIds.has(t.id),
+            extraClass: isClaimed ? "claimed" : "",
+          });
         })
         .join("");
       return `
@@ -245,6 +266,7 @@ function meldsRow(player: Player, extraClass = ""): string {
 
 function riverHtml(state: GameState, player: Player): string {
   const last = state.lastDiscard;
+  const doraIds = currentDoraIds(state);
   const tiles = player.discards.map((t, i) => {
     const isLast =
       last !== null &&
@@ -257,7 +279,7 @@ function riverHtml(state: GameState, player: Player): string {
     const classes = [isLast ? "last-discard" : "", isRiichiTile ? "riichi-tile" : ""]
       .filter(Boolean)
       .join(" ");
-    return renderTile(t, { variant: "discard", extraClass: classes });
+    return renderTile(t, { variant: "discard", dora: doraIds.has(t.id), extraClass: classes });
   });
   // 6枚×2段 + 3段目は無制限に横へ伸びる (河は18枚を超えうる)
   const rows = [tiles.slice(0, 6), tiles.slice(6, 12), tiles.slice(12)];

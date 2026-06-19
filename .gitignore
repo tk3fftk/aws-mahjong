@@ -4,3 +4,4 @@ node_modules/
 .vite/
 .claude
 docs/app/
+.playwright-mcp/

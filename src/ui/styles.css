@@ -8,8 +8,14 @@
   --danger: #e0144d;
   --text: #fafafa;
   --text-dim: rgba(250, 250, 250, 0.65);
-  --tile-bg: #f5f5f0;
-  --tile-border: #52606f;
+  --tile-bg: #fcfcf8;
+  --tile-border: #46525f;
+  /* スート色 (牌下端の色帯 / ドラ★) */
+  --suit-m: #c0392b;
+  --suit-p: #2980b9;
+  --suit-s: #27ae60;
+  --suit-z: #b8860b;
+  --dora: #ffcf33;
   /* 手牌 (自分) のサイズ。卓上の捨て牌/裏牌は .table 側で --table-size から導出 */
   --tile-w: clamp(40px, 5.5vw, 52px);
   --tile-h: clamp(56px, 7.8vw, 74px);
@@ -94,9 +100,9 @@ h1 {
   width: var(--tile-w);
   height: var(--tile-h);
   background: var(--tile-bg);
-  border: 1.5px solid var(--tile-border);
+  border: 2px solid var(--tile-border);
   border-radius: 5px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   overflow: hidden;
   cursor: default;
   user-select: none;
@@ -108,6 +114,46 @@ h1 {
   max-width: 100%;
   max-height: 100%;
   pointer-events: none;
+}
+
+/* スート色分け: 牌下端の色帯。アイコンからスート判別しづらいため一目で分かるようにする。
+   擬似要素で実装し、selected/last-discard 等の outline・box-shadow と競合させない */
+.tile.suit-m::after,
+.tile.suit-p::after,
+.tile.suit-s::after,
+.tile.suit-z::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  pointer-events: none;
+}
+.tile.suit-m::after { background: var(--suit-m); }
+.tile.suit-p::after { background: var(--suit-p); }
+.tile.suit-s::after { background: var(--suit-s); }
+.tile.suit-z::after { background: var(--suit-z); }
+/* 小さい捨て牌では帯も細く */
+.tile.discard::after { height: 3px; }
+
+/* ドラ牌マーカー: 左上の金色★。手牌・河・副露で点数価値を一目で把握できるようにする。
+   outline/box-shadow を使わず擬似要素のみ → 選択・直前打牌のハイライトと共存できる */
+.tile.is-dora::before {
+  content: "★";
+  position: absolute;
+  top: 0;
+  left: 1px;
+  z-index: 3;
+  line-height: 1;
+  font-size: 14px;
+  color: var(--dora);
+  text-shadow: 0 0 1px #000, 0 0 2px #000;
+  pointer-events: none;
+}
+/* 捨て牌/副露の小さい牌では★も小さく */
+.tile.discard.is-dora::before {
+  font-size: 10px;
 }
 
 .tile.back {
@@ -170,8 +216,9 @@ h1 {
 }
 
 .tile.last-discard {
-  outline: 2px solid var(--accent);
-  box-shadow: 0 0 8px var(--accent-soft);
+  outline: 3px solid var(--accent);
+  box-shadow: 0 0 12px rgba(255, 153, 0, 0.75);
+  z-index: 2;
 }
 
 .tile.claimed {
@@ -309,9 +356,12 @@ button.riichi.armed {
   transform: translate(-50%, -50%) rotate(-90deg); /* 右=下家 (south) */
 }
 
-/* 手番グロー: 回転コンテンツに追従するよう box-shadow ではなく drop-shadow */
-.zone.active .zone-inner {
-  filter: drop-shadow(0 0 6px rgba(255, 153, 0, 0.55));
+/* 手番グロー: 回転コンテンツに追従するよう box-shadow ではなく drop-shadow。
+   ゾーン全体を塗りつぶすと「自分の前」の空きエリアが大きく色づいてしまうため、
+   牌(コンテンツ)だけを光らせる。手番のプレイヤー特定は中央の点数チップのリングが担う。
+   自分(下ゾーン)は手牌・操作ボタンで手番が自明なので除外し、対面/上家/下家(CPU)だけ光らせる */
+.zone.active:not(.zone-bottom) .zone-inner {
+  filter: drop-shadow(0 0 9px rgba(255, 153, 0, 0.75));
 }
 
 .opp-meta {
