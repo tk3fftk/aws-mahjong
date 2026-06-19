@@ -146,6 +146,44 @@ describe("calcScore / 満貫以上の段階境界 (fu 非依存)", () => {
   });
 });
 
+describe("calcScore / 本場 (honba)", () => {
+  it("子・1飜30符・ロン・1本場 = 1000 + 300 = 1300", () => {
+    expect(
+      calcScore({ totalHan: 1, fu: 30, isDealer: false, isTsumo: false, honba: 1 }),
+    ).toEqual({ kind: "ron", fromDiscarder: 1300, total: 1300 });
+  });
+
+  it("子・1飜30符・ロン・2本場 = 1000 + 600 = 1600", () => {
+    expect(
+      calcScore({ totalHan: 1, fu: 30, isDealer: false, isTsumo: false, honba: 2 }).total,
+    ).toBe(1600);
+  });
+
+  it("親・1飜30符・ロン・1本場 = 1500 + 300 = 1800", () => {
+    expect(
+      calcScore({ totalHan: 1, fu: 30, isDealer: true, isTsumo: false, honba: 1 }).total,
+    ).toBe(1800);
+  });
+
+  it("子・1飜30符・ツモ・1本場 = 親 600 + 子 400×2 = 1400 (各 +100)", () => {
+    expect(
+      calcScore({ totalHan: 1, fu: 30, isDealer: false, isTsumo: true, honba: 1 }),
+    ).toEqual({ kind: "tsumo-ko", fromDealer: 600, fromEachKo: 400, total: 1400 });
+  });
+
+  it("親・1飜30符・ツモ・1本場 = 子3人から各 600 = 1800 (各 +100)", () => {
+    expect(
+      calcScore({ totalHan: 1, fu: 30, isDealer: true, isTsumo: true, honba: 1 }),
+    ).toEqual({ kind: "tsumo-dealer", fromEachKo: 600, total: 1800 });
+  });
+
+  it("honba 省略時は 0 本場と同じ (回帰)", () => {
+    expect(calcScore({ totalHan: 1, fu: 30, isDealer: false, isTsumo: false })).toEqual(
+      calcScore({ totalHan: 1, fu: 30, isDealer: false, isTsumo: false, honba: 0 }),
+    );
+  });
+});
+
 describe("calcScore / 役満", () => {
   it("親・役満(13飜)・ロン = 48000", () => {
     expect(calcScore({ totalHan: 13, fu: 30, isDealer: true, isTsumo: false }).total).toBe(48000);

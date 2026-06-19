@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { GameController } from "./game";
+import { GameController, isBusted } from "./game";
 import { calcScore } from "./score";
 import { mpszToTiles, sortTiles } from "./tiles";
 import { countDoraHan, uraDoraIndicators } from "./dora";
 import { riggedDeal, type RiggedDeal } from "./debug/rigged";
+import { winningTiles } from "./winning/furiten";
 import type { Seat } from "./types";
 
 const ALL_SEATS: Seat[] = ["east", "south", "west", "north"];
@@ -639,7 +640,7 @@ describe("GameController / ドラ", () => {
   });
 });
 
-describe("GameController / 局送り (親・家の移り変わり)", () => {
+describe("GameController / 局送り (連荘・本場・終局)", () => {
   // 東1で人間 (親) がロン和了できるリグ。pile 0 (次局の親の手) は和了形ではないので、
   // 同じ仕込み壁が再配牌されても東2の CPU 親が即ツモすることはない
   const RON_RIG: RiggedDeal = {
@@ -655,61 +656,112 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
     expect(game.state.phase).toBe("win");
   }
 
-  it("和了後の startNextRound で親が south に移り、家が一巡ずれる", () => {
+  it("親がロン和了すると連荘: roundIndex 据え置き・本場+1・親と風は不変", () => {
     const game = riggedGame(RON_RIG);
     winRound1(game);
     const eastScoreAfterWin = game.state.players.east.score;
 
     game.startNextRound();
     const s = game.state;
-    expect(s.roundIndex).toBe(1); // 東2局
-    expect(s.players.south.isDealer).toBe(true);
-    expect(s.players.east.isDealer).toBe(false);
-    // 風はツモ順で回る: 親 south=東家、west=南家、north=西家、east=北家
-    expect(s.players.south.seatWind).toBe("1z");
-    expect(s.players.west.seatWind).toBe("2z");
-    expect(s.players.north.seatWind).toBe("3z");
-    expect(s.players.east.seatWind).toBe("4z");
-    // 点数は引き継がれる (連荘なしでも精算結果は保持)。east は東2の自動進行中に放銃していない
-    // (loop は CPU の手番のみ消化するため) ので和了後の値のまま。south は CPU リーチ→和了し得るので不問。
+    expect(s.roundIndex).toBe(0); // 東1局のまま (連荘)
+    expect(s.honba).toBe(1); // 連荘で本場+1
+    expect(s.players.east.isDealer).toBe(true); // 親は east のまま
+    expect(s.players.south.isDealer).toBe(false);
+    // 風も親も据え置き: east=東家、south=南家…
+    expect(s.players.east.seatWind).toBe("1z");
+    expect(s.players.south.seatWind).toBe("2z");
+    // 点数は引き継がれる。east は人間で再配牌後まだ着手していないので和了後の値のまま
     expect(s.players.east.score).toBe(eastScoreAfterWin);
-    // 供託 (CPU リーチ棒) を含めた不変条件: Σ score + riichiPot === 100000 (D-013)。
-    // CPU 親 (south) がリーチして即和了し東2が即決することもあるが、不変条件は常に保たれる。
     expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
-    // east は東2でまだ着手していない (自動進行は人間の手番 or 終局/和了で停止)
-    expect(s.players.east.discards).toHaveLength(0);
+    // 再配牌され phase=discard / turn=east に戻る (親 east の手番)
+    expect(s.phase).toBe("discard");
+    expect(s.turn).toBe("east");
   });
 
-  it("流局でも親は交代する (連荘なし)", () => {
-    const game = new GameController({ seed: 1 });
+  it("連荘局では本場分が和了点に加算される (1本場ロンで +300)", () => {
+    const game = riggedGame(RON_RIG);
+    winRound1(game);
+    const score0 = game.state.winInfo!.score; // 0本場の和了点
+    game.startNextRound();
+    expect(game.state.honba).toBe(1);
+    winRound1(game); // 同じ壁が再配牌され、もう一度東1局でロン和了 (1本場)
+    expect(game.state.winInfo!.score).toBe(score0 + 300); // ロンは放銃者 +300×本場
+  });
+
+  // east を形式テンパイ (3p待ち・AWS役なし) にし、ツモ切りで聴牌維持したまま流局させるリグ
+  const DEALER_TENPAI_DRAW_RIG: RiggedDeal = { east: "123m456m789m12p55s9p" };
+
+  // 人間 east がツモ牌をそのまま切り (聴牌維持)、局を終局まで進める
+  function drawWithTsumogiri(game: GameController): void {
+    for (let safety = 0; safety < 600; safety++) {
+      const phase = game.state.phase;
+      if (phase === "draw_game" || phase === "win") return;
+      if (phase === "claim") {
+        game.humanSkipClaim();
+        continue;
+      }
+      const draw = game.state.lastDrawTile;
+      const idx = draw ? game.state.players.east.hand.indexOf(draw) : 0;
+      game.humanDiscard(idx >= 0 ? idx : 0);
+    }
+    throw new Error("round did not finish");
+  }
+
+  it("流局・親テンパイ → 連荘 (roundIndex 据え置き・本場+1)", () => {
+    const game = riggedGame(DEALER_TENPAI_DRAW_RIG);
+    drawWithTsumogiri(game);
+    expect(game.state.phase).toBe("draw_game");
+    const dealer = game.state.players.east;
+    expect(winningTiles(dealer.hand, dealer.melds).length).toBeGreaterThan(0); // 親は形式テンパイ
+
+    game.startNextRound();
+    const s = game.state;
+    expect(s.roundIndex).toBe(0); // 親テンパイ流局 → 連荘
+    expect(s.honba).toBe(1); // 流局で本場+1
+    expect(s.players.east.isDealer).toBe(true);
+    expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
+  });
+
+  it("流局・親ノーテン → 親交代 (本場+1 を引き継ぐ)", () => {
+    const game = new GameController({ seed: 5 }); // seed=5 は親ノーテン流局
     game.startMatch();
     playRoundToEnd(game);
+    expect(game.state.phase).toBe("draw_game");
+    const dealer = game.state.players.east;
+    expect(winningTiles(dealer.hand, dealer.melds).length).toBe(0); // 親ノーテン
+
     game.startNextRound();
-    expect(game.state.roundIndex).toBe(1);
-    expect(game.state.players.south.isDealer).toBe(true);
-    expect(totalScore(game)).toBe(TOTAL_SCORE);
+    const s = game.state;
+    expect(s.roundIndex).toBe(1); // 親ノーテン流局 → 親交代
+    expect(s.honba).toBe(1); // 流局は親交代でも本場+1 を引き継ぐ
+    expect(s.players.south.isDealer).toBe(true);
+    expect(totalScore(game) + s.riichiPot).toBe(TOTAL_SCORE);
   });
 
-  it("東4局終了後の startNextRound で終局 (round_end)、点数は動かない", () => {
+  it("親が北家(東4局)から連荘せず流れたら終局 (round_end)、点数は動かない", () => {
     const game = new GameController({ seed: 1 });
     game.startMatch();
-    for (let round = 0; round < 4; round++) {
-      expect(game.state.roundIndex).toBe(round);
-      expect(game.state.players[ALL_SEATS[round]!].isDealer).toBe(true);
+    let reachedNorth = false;
+    for (let i = 0; i < 200; i++) {
+      if (game.state.phase === "round_end") break;
+      if (game.state.roundIndex === 3) reachedNorth = true; // 東4局 (北家親) に到達
       playRoundToEnd(game);
       game.startNextRound();
     }
     expect(game.state.phase).toBe("round_end");
-    // 終局時の点数保存則: 未回収のリーチ棒 (供託) が残り得るため riichiPot を含めて 10万点
+    expect(reachedNorth).toBe(true); // 北家まで局が進んでいる
     expect(totalScore(game) + game.state.riichiPot).toBe(TOTAL_SCORE);
   });
 
-  it("終局から startMatch でやり直すと 25000点×4・東1局に戻る", () => {
+  it("終局から startMatch でやり直すと 25000点×4・東1局・0本場に戻る", () => {
     const game = riggedGame(RON_RIG);
     winRound1(game);
+    game.startNextRound(); // 連荘して 1本場にしておく
+    expect(game.state.honba).toBe(1);
     game.startMatch();
     const s = game.state;
     expect(s.roundIndex).toBe(0);
+    expect(s.honba).toBe(0); // 本場もリセット
     for (const seat of ALL_SEATS) {
       expect(s.players[seat].score).toBe(25000);
     }
@@ -723,6 +775,44 @@ describe("GameController / 局送り (親・家の移り変わり)", () => {
     game.startNextRound();
     expect(game.state.roundIndex).toBe(0);
     expect(game.state.phase).toBe("discard");
+  });
+});
+
+describe("GameController / 飛び (持ち点マイナスで終局)", () => {
+  // 親 east の即ツモ和了リグ (ツモ精算テストと同じ)。子3人が支払う
+  const TSUMO_RIG: RiggedDeal = { east: "555z234m567m234p55s" };
+
+  it("子が精算で持ち点マイナスになったら局数に関係なく終局 (round_end)", () => {
+    const game = riggedGame(TSUMO_RIG);
+    game.state.players.south.score = 100; // 親ツモを払いきれず飛ぶ
+    expect(game.humanDeclareTsumo().success).toBe(true);
+    expect(game.state.roundIndex).toBe(0); // まだ東1局
+    game.startNextRound();
+    expect(game.state.phase).toBe("round_end"); // 飛び終了
+    expect(game.state.players.south.score).toBeLessThan(0);
+  });
+
+  it("全員プラスなら飛びは起きず通常どおり局が続く", () => {
+    const game = riggedGame(TSUMO_RIG);
+    expect(game.humanDeclareTsumo().success).toBe(true); // 親ツモ → 連荘
+    game.startNextRound();
+    expect(game.state.phase).not.toBe("round_end");
+    expect(game.state.phase).toBe("discard"); // 再配牌され局が続く
+  });
+
+  it("isBusted: 持ち点ちょうど0は飛びではない、負は飛び", () => {
+    const game = riggedGame(TSUMO_RIG);
+    game.state.players.south.score = 0;
+    expect(isBusted(game.state)).toBe(false);
+    game.state.players.south.score = -1;
+    expect(isBusted(game.state)).toBe(true);
+  });
+
+  it("initialScores で開始持ち点を席ごとに上書きできる", () => {
+    const game = new GameController({ initialScores: { south: 500 } });
+    game.startMatch();
+    expect(game.state.players.south.score).toBe(500);
+    expect(game.state.players.east.score).toBe(25000); // 未指定はデフォルト
   });
 });
 

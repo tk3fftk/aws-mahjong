@@ -59,6 +59,8 @@ function createGame(): GameController {
     // 仕込みシナリオ (?debug=ron 等) は CPU を旧来の決定的ロジックに固定してプリセット通りに進める。
     // 通常プレイ・パネルのみ (?debug=1, rig なし) では席ごとの三者三様の性格を有効にする
     legacyCpu: rig != null,
+    // ?scoreSouth=500 等で開始持ち点を上書き (飛び終了の再現用)
+    initialScores: debugConfig?.initialScores,
     // 状態が変わったら選択は無効化して再描画 (捨て/並び替え/手番交代など)
     onChange: () => {
       ui.selectedHandIndex = null;

@@ -87,6 +87,7 @@ export interface GameState {
   turn: Seat;
   roundWind: SeatWind;
   roundIndex: number;
+  honba: number; // 本場数。親の和了・親テンパイ流局で連荘し +1、子の和了で 0 リセット (D-011)
   phase: Phase;
   lastDrawTile: Tile | null; // ツモ直後のみ非 null。鳴き後の打牌待ちでは null
   lastDiscard: { seat: Seat; tile: Tile } | null; // 直前打牌のハイライト用

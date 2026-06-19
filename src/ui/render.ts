@@ -3,6 +3,7 @@ import { renderTile, renderTileById } from "./tile-view";
 import { openYakuHelp } from "./yaku-help";
 import { doraIndicators, MAX_DORA_INDICATORS } from "../dora";
 import { YAKU_LIST } from "../yaku/aws-pattern";
+import { isBusted } from "../game";
 
 export interface RenderHandlers {
   // 手牌クリック: 1回目で選択、選択済み牌の再クリックで捨てる (main.ts 側で判定)
@@ -163,7 +164,7 @@ function centerSquare(state: GameState): string {
   return `
     <div class="center">
       <div class="center-info">
-        <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局</div>
+        <div class="round">${ROUND_WIND_NAME[state.roundWind]}${state.roundIndex + 1}局${state.honba > 0 ? ` ${state.honba}本場` : ""}</div>
         <div class="wall">山 ${state.wall.length}</div>
         ${state.riichiPot > 0 ? `<div class="pot">供託 ${state.riichiPot}</div>` : ""}
         <div class="dora-row" title="ドラ表示牌">${doraTiles}</div>
@@ -354,9 +355,11 @@ function modalWrap(content: string): string {
 }
 
 function nextRoundButton(state: GameState): string {
+  // 東4局終了 または 飛び (誰かマイナス) なら次は終局画面へ
+  const toResult = state.roundIndex >= 3 || isBusted(state);
   return `
     <div class="actions">
-      <button data-action="new-round">${state.roundIndex >= 3 ? "結果発表へ" : "次の局へ"}</button>
+      <button data-action="new-round">${toResult ? "結果発表へ" : "次の局へ"}</button>
     </div>
   `;
 }
@@ -423,17 +426,18 @@ function roundEndPanel(state: GameState): string {
         ? b.score - a.score
         : ALL_SEATS.indexOf(a.seat) - ALL_SEATS.indexOf(b.seat),
     );
+  const busted = isBusted(state);
   const rows = standings
     .map(
       (player, i) => `
         <li class="${player.isHuman ? "me" : ""}">
-          <span>${i + 1}位 ${seatName(player)}</span>
+          <span>${i + 1}位 ${seatName(player)}${player.score < 0 ? " (飛び)" : ""}</span>
           <span>${player.score} 点</span>
         </li>`,
     )
     .join("");
   return `
-    <h2>終局 — 最終結果</h2>
+    <h2>${busted ? "飛び終了" : "終局"} — 最終結果</h2>
     <ul class="yaku-list standings">${rows}</ul>
     <div class="actions">
       <button data-action="new-match">もう一度遊ぶ</button>
