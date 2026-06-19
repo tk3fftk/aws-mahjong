@@ -1,6 +1,6 @@
 import type { CalledMeld, GameState, Player, Seat, Tile, TileId, WinInfo } from "../types";
 import { renderTile, renderTileById } from "./tile-view";
-import { openYakuHelp } from "./yaku-help";
+import { openHelpModal } from "./yaku-help";
 import { doraIndicators, MAX_DORA_INDICATORS, nextTile } from "../dora";
 import { YAKU_LIST } from "../yaku/aws-pattern";
 import { isBusted } from "../game";
@@ -111,7 +111,7 @@ export function render(
     <header class="app-header">
       <h1>AWS Mahjong</h1>
       <span class="phase-chip">${phaseLabel}</span>
-      <button data-action="show-yaku-help" class="help-btn" aria-label="役一覧を表示">?</button>
+      <button data-action="show-yaku-help" class="help-btn" aria-label="ヘルプを表示">?</button>
     </header>
 
     <div class="table">
@@ -510,7 +510,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
   on('button[data-action="tsumo"]', () => handlers.onDeclareTsumo());
   on('button[data-action="new-round"]', () => handlers.onNextRound());
   on('button[data-action="new-match"]', () => handlers.onNewMatch());
-  on('button[data-action="show-yaku-help"]', () => openYakuHelp());
+  on('button[data-action="show-yaku-help"]', () => openHelpModal());
   on('button[data-action="claim-ron"]', () => handlers.onClaimRon());
   on('button[data-action="claim-kan"]', () => handlers.onClaimKan());
   on('button[data-action="claim-pon"]', () => handlers.onClaimPon());

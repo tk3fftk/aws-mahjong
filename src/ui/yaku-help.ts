@@ -71,7 +71,23 @@ function renderYakuItem(entry: YakuJsonEntry): string {
 
 const ITEMS_HTML = YAKU_LIST.map(renderYakuItem).join("");
 
-export function openYakuHelp(): void {
+const HOWTO_HTML = `
+  <div class="help-howto">
+    <h3>遊び方</h3>
+    <ul>
+      <li>東風戦（東1局〜東4局）です。</li>
+      <li>手牌の自動ソートは配牌時のみ行われます。以降はドラッグ&ドロップで並べ替えてください。</li>
+    </ul>
+    <h3>コンセプト・出典</h3>
+    <p>
+      「AWS麻雀」のコンセプト・出典:
+      <a href="https://mu7889yoon.github.io/aws-mahjong/v2.0.1/" target="_blank" rel="noopener noreferrer">mu7889yoon.github.io/aws-mahjong/v2.0.1/</a>
+      （version 2.0.1 に準拠）
+    </p>
+  </div>
+`;
+
+export function openHelpModal(): void {
   if (document.querySelector(".yaku-help-overlay")) return;
 
   const previousFocus = document.activeElement as HTMLElement | null;
@@ -80,16 +96,50 @@ export function openYakuHelp(): void {
   overlay.className = "yaku-help-overlay";
 
   overlay.innerHTML = `
-    <div class="yaku-help-content" role="dialog" aria-modal="true" aria-labelledby="yaku-help-title">
+    <div class="yaku-help-content" role="dialog" aria-modal="true" aria-label="ヘルプ">
       <div class="yaku-help-header">
-        <h2 id="yaku-help-title">AWS役一覧</h2>
+        <div class="yaku-help-tabs" role="tablist">
+          <button role="tab" class="yaku-help-tab active" data-tab="yaku"
+                  aria-selected="true" aria-controls="help-panel-yaku">AWS役一覧</button>
+          <button role="tab" class="yaku-help-tab" data-tab="howto"
+                  aria-selected="false" aria-controls="help-panel-howto">遊び方</button>
+        </div>
         <button class="yaku-help-close help-btn" aria-label="閉じる">✕</button>
       </div>
-      <div class="yaku-help-list">${ITEMS_HTML}</div>
+      <div id="help-panel-yaku" class="yaku-help-panel" role="tabpanel">
+        <div class="yaku-help-list">${ITEMS_HTML}</div>
+      </div>
+      <div id="help-panel-howto" class="yaku-help-panel" role="tabpanel" hidden>
+        ${HOWTO_HTML}
+      </div>
     </div>
   `;
 
   const closeBtn = overlay.querySelector<HTMLButtonElement>(".yaku-help-close")!;
+  const content = overlay.querySelector<HTMLElement>(".yaku-help-content")!;
+  const tabs = overlay.querySelectorAll<HTMLButtonElement>(".yaku-help-tab");
+  const panels = overlay.querySelectorAll<HTMLElement>(".yaku-help-panel");
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      panels.forEach((p) => {
+        p.hidden = true;
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+      const panel = overlay.querySelector<HTMLElement>(
+        `#help-panel-${tab.dataset.tab}`,
+      );
+      if (panel) {
+        panel.hidden = false;
+        content.scrollTop = 0;
+      }
+    });
+  });
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === "Escape") close();
