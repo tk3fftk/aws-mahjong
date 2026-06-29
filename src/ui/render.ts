@@ -132,6 +132,25 @@ export function render(
 }
 
 let dragSrcIndex: number | null = null;
+let touchDragSrcIndex: number | null = null;
+let touchDragStartX = 0;
+let touchDragStartY = 0;
+let touchDragActive = false;
+let touchDragGhost: HTMLElement | null = null;
+let touchDragOverEl: HTMLElement | null = null;
+
+function cleanupTouchDrag(): void {
+  if (touchDragGhost) {
+    touchDragGhost.remove();
+    touchDragGhost = null;
+  }
+  if (touchDragOverEl) {
+    touchDragOverEl.classList.remove("drag-over");
+    touchDragOverEl = null;
+  }
+  touchDragSrcIndex = null;
+  touchDragActive = false;
+}
 
 function opponentZone(state: GameState, seat: Seat, pos: "top" | "left" | "right"): string {
   const player = state.players[seat];
@@ -502,6 +521,86 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       const from = dragSrcIndex ?? Number(e.dataTransfer?.getData("text/plain"));
       if (Number.isNaN(from) || Number.isNaN(to)) return;
       handlers.onReorder(from, to);
+    });
+
+    // タッチによる手牌並び替え (HTML5 DnD はタッチ非対応)
+    el.addEventListener("touchstart", (e) => {
+      if (touchDragActive) return;
+      const idx = Number(el.dataset.index);
+      if (Number.isNaN(idx)) return;
+      const t = e.touches[0];
+      if (!t) return;
+      touchDragSrcIndex = idx;
+      touchDragStartX = t.clientX;
+      touchDragStartY = t.clientY;
+      touchDragActive = false;
+    }, { passive: true });
+
+    el.addEventListener("touchmove", (e) => {
+      if (touchDragSrcIndex === null) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - touchDragStartX;
+      const dy = t.clientY - touchDragStartY;
+
+      if (!touchDragActive) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        touchDragActive = true;
+        e.preventDefault();
+        const ghost = document.createElement("div");
+        ghost.className = "touch-drag-ghost";
+        ghost.innerHTML = el.outerHTML;
+        ghost.style.left = `${t.clientX - el.offsetWidth / 2}px`;
+        ghost.style.top = `${t.clientY - el.offsetHeight / 2}px`;
+        document.body.appendChild(ghost);
+        touchDragGhost = ghost;
+        el.classList.add("dragging");
+        return;
+      }
+
+      e.preventDefault();
+      if (touchDragGhost) {
+        touchDragGhost.style.left = `${t.clientX - el.offsetWidth / 2}px`;
+        touchDragGhost.style.top = `${t.clientY - el.offsetHeight / 2}px`;
+      }
+
+      const target = document.elementFromPoint(t.clientX, t.clientY)
+        ?.closest<HTMLElement>(".tile.hand[data-index]");
+      if (touchDragOverEl && touchDragOverEl !== target) {
+        touchDragOverEl.classList.remove("drag-over");
+      }
+      if (target && target !== el) {
+        target.classList.add("drag-over");
+        touchDragOverEl = target;
+      } else {
+        touchDragOverEl = null;
+      }
+    });
+
+    el.addEventListener("touchend", (e) => {
+      if (touchDragSrcIndex === null) return;
+      if (!touchDragActive) {
+        touchDragSrcIndex = null;
+        return;
+      }
+      el.classList.remove("dragging");
+      const t = e.changedTouches[0];
+      if (!t) { cleanupTouchDrag(); return; }
+      const target = document.elementFromPoint(t.clientX, t.clientY)
+        ?.closest<HTMLElement>(".tile.hand[data-index]");
+      const from = touchDragSrcIndex;
+      cleanupTouchDrag();
+      if (target) {
+        const to = Number(target.dataset.index);
+        if (!Number.isNaN(from) && !Number.isNaN(to) && from !== to) {
+          handlers.onReorder(from, to);
+        }
+      }
+    });
+
+    el.addEventListener("touchcancel", () => {
+      el.classList.remove("dragging");
+      cleanupTouchDrag();
     });
   });
   const on = (selector: string, fn: () => void) => {
