@@ -135,9 +135,10 @@ let dragSrcIndex: number | null = null;
 let touchDragSrcIndex: number | null = null;
 let touchDragStartX = 0;
 let touchDragStartY = 0;
-let touchDragActive = false;
 let touchDragGhost: HTMLElement | null = null;
 let touchDragOverEl: HTMLElement | null = null;
+let touchDragOffsetW = 0;
+let touchDragOffsetH = 0;
 
 function cleanupTouchDrag(): void {
   if (touchDragGhost) {
@@ -149,7 +150,6 @@ function cleanupTouchDrag(): void {
     touchDragOverEl = null;
   }
   touchDragSrcIndex = null;
-  touchDragActive = false;
 }
 
 function opponentZone(state: GameState, seat: Seat, pos: "top" | "left" | "right"): string {
@@ -525,7 +525,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
 
     // タッチによる手牌並び替え (HTML5 DnD はタッチ非対応)
     el.addEventListener("touchstart", (e) => {
-      if (touchDragActive) return;
+      if (touchDragGhost) return;
       const idx = Number(el.dataset.index);
       if (Number.isNaN(idx)) return;
       const t = e.touches[0];
@@ -533,7 +533,6 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       touchDragSrcIndex = idx;
       touchDragStartX = t.clientX;
       touchDragStartY = t.clientY;
-      touchDragActive = false;
     }, { passive: true });
 
     el.addEventListener("touchmove", (e) => {
@@ -543,15 +542,16 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       const dx = t.clientX - touchDragStartX;
       const dy = t.clientY - touchDragStartY;
 
-      if (!touchDragActive) {
+      if (!touchDragGhost) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        touchDragActive = true;
         e.preventDefault();
+        touchDragOffsetW = el.offsetWidth / 2;
+        touchDragOffsetH = el.offsetHeight / 2;
         const ghost = document.createElement("div");
         ghost.className = "touch-drag-ghost";
         ghost.innerHTML = el.outerHTML;
-        ghost.style.left = `${t.clientX - el.offsetWidth / 2}px`;
-        ghost.style.top = `${t.clientY - el.offsetHeight / 2}px`;
+        ghost.style.left = `${t.clientX - touchDragOffsetW}px`;
+        ghost.style.top = `${t.clientY - touchDragOffsetH}px`;
         document.body.appendChild(ghost);
         touchDragGhost = ghost;
         el.classList.add("dragging");
@@ -559,16 +559,12 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       }
 
       e.preventDefault();
-      if (touchDragGhost) {
-        touchDragGhost.style.left = `${t.clientX - el.offsetWidth / 2}px`;
-        touchDragGhost.style.top = `${t.clientY - el.offsetHeight / 2}px`;
-      }
+      touchDragGhost.style.left = `${t.clientX - touchDragOffsetW}px`;
+      touchDragGhost.style.top = `${t.clientY - touchDragOffsetH}px`;
 
       const target = document.elementFromPoint(t.clientX, t.clientY)
         ?.closest<HTMLElement>(".tile.hand[data-index]");
-      if (touchDragOverEl && touchDragOverEl !== target) {
-        touchDragOverEl.classList.remove("drag-over");
-      }
+      if (touchDragOverEl) touchDragOverEl.classList.remove("drag-over");
       if (target && target !== el) {
         target.classList.add("drag-over");
         touchDragOverEl = target;
@@ -579,7 +575,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
 
     el.addEventListener("touchend", (e) => {
       if (touchDragSrcIndex === null) return;
-      if (!touchDragActive) {
+      if (!touchDragGhost) {
         touchDragSrcIndex = null;
         return;
       }
@@ -589,13 +585,13 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       const target = document.elementFromPoint(t.clientX, t.clientY)
         ?.closest<HTMLElement>(".tile.hand[data-index]");
       const from = touchDragSrcIndex;
-      cleanupTouchDrag();
       if (target) {
         const to = Number(target.dataset.index);
         if (!Number.isNaN(from) && !Number.isNaN(to) && from !== to) {
           handlers.onReorder(from, to);
         }
       }
+      cleanupTouchDrag();
     });
 
     el.addEventListener("touchcancel", () => {
