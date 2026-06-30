@@ -365,7 +365,7 @@ function actionsHtml(state: GameState, ui: UiState): string {
       : "";
   return `
     <div class="actions">
-      <button data-action="tsumo" ${canTsumo ? "" : "disabled"}>ツモ和了</button>
+      ${canTsumo ? '<button data-action="tsumo">ツモ和了</button>' : ""}
       ${riichiButton}
       ${selfKanButtons}
     </div>
