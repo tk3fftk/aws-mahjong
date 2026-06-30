@@ -571,7 +571,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       } else {
         touchDragOverEl = null;
       }
-    });
+    }, { passive: false });
 
     el.addEventListener("touchend", (e) => {
       if (touchDragSrcIndex === null) return;
