@@ -1043,11 +1043,25 @@ button.secondary {
 
   .table {
     --table-size: min(calc(100dvh - var(--hand-area-h) - 4px), calc(100dvw - 4px));
-    --tile-discard-w: max(14px, min(
+    --tile-discard-w: max(16px, min(
       calc((var(--table-size) - 50px) / 17.2),
       calc((var(--table-size) - 150px) / 11.2)
     ));
-    --zone-depth: calc(var(--tile-discard-h) * 3 + 16px);
+    --zone-depth: calc(var(--tile-discard-h) * 2.5 + 16px);
+  }
+
+  .river {
+    min-height: calc(var(--tile-discard-h) * 2 + 3px);
+  }
+
+  .zone-left,
+  .zone-right {
+    overflow: hidden;
+  }
+
+  .center {
+    margin: 3px;
+    padding: 3px;
   }
 
   .hand-area {
