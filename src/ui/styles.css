@@ -980,6 +980,178 @@ button.secondary {
   }
 }
 
+/* ---- 横向きモバイル (雀魂-style landscape) ---- */
+
+@media (max-height: 500px) and (min-aspect-ratio: 1/1) {
+  :root {
+    --header-h: 0px;
+    --hand-area-h: 64px;
+    --tile-w: clamp(32px, 6.5dvw, 48px);
+    --tile-h: clamp(45px, 9.1dvw, 56px);
+    --tile-gap: 2px;
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  #app {
+    max-width: none;
+    padding: 2px 4px 0;
+    padding-left: env(safe-area-inset-left, 4px);
+    padding-right: env(safe-area-inset-right, 4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100dvh;
+  }
+
+  .app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    z-index: 12;
+    background: transparent;
+    pointer-events: none;
+    padding: 2px 8px;
+    gap: 4px;
+  }
+
+  .app-header > * {
+    pointer-events: auto;
+  }
+
+  .app-header h1 {
+    display: none;
+  }
+
+  .phase-chip {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: rgba(35, 47, 62, 0.85);
+    border-radius: 4px;
+  }
+
+  .help-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 0.85rem;
+    background: rgba(35, 47, 62, 0.85);
+  }
+
+  .table {
+    --table-size: min(calc(100dvh - var(--hand-area-h) - 4px), calc(100dvw - 4px));
+    --tile-discard-w: max(14px, min(
+      calc((var(--table-size) - 50px) / 17.2),
+      calc((var(--table-size) - 150px) / 11.2)
+    ));
+    --zone-depth: calc(var(--tile-discard-h) * 3 + 16px);
+  }
+
+  .hand-area {
+    position: relative;
+    width: 100%;
+    margin: auto 0 0;
+    padding: 2px 4px;
+    padding-bottom: env(safe-area-inset-bottom, 2px);
+    background: linear-gradient(transparent, rgba(22, 30, 45, 0.95) 8px);
+  }
+
+  .hand-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .hand-row {
+    grid-column: unset;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--tile-gap);
+  }
+
+  .human-melds {
+    grid-column: unset;
+    justify-self: unset;
+  }
+
+  .tile.draw-separated {
+    margin-left: 8px;
+  }
+
+  .hand-area > .actions {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 4px;
+    min-height: 0;
+    background: rgba(22, 30, 45, 0.9);
+    border-radius: 8px;
+    padding: 4px 8px;
+    z-index: 11;
+  }
+
+  .hand-area > .actions:empty {
+    display: none;
+  }
+
+  .hand-area > .actions button {
+    min-height: 44px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  .modal .tile {
+    --tile-w: 28px;
+    --tile-h: 39px;
+  }
+
+  .score-chip .chip-name {
+    display: none;
+  }
+
+  .modal {
+    max-height: 90dvh;
+    width: min(560px, 92vw);
+    padding: 12px;
+  }
+
+  .modal h2 {
+    font-size: 1rem;
+    margin-bottom: 4px;
+  }
+
+  .yaku-help-content {
+    height: min(90dvh, 720px);
+    width: min(720px, 92vw);
+  }
+
+  .yaku-help-header {
+    padding: 8px 12px;
+  }
+
+  .yaku-help-tab {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+  }
+
+  .toast {
+    bottom: 60px;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+  }
+
+  #debug-panel {
+    width: 260px;
+    font-size: 10px;
+  }
+}
+
 /* ---- debug panel (?debug=...) ---- */
 
 #debug-panel {
