@@ -363,13 +363,15 @@ function actionsHtml(state: GameState, ui: UiState): string {
     isMyTurn && state.riichiCandidates.length > 0
       ? `<button data-action="riichi" class="riichi${ui.riichiArmed ? " armed" : ""}">リーチ</button>`
       : "";
-  return `
-    <div class="actions">
-      ${canTsumo ? '<button data-action="tsumo">ツモ和了</button>' : ""}
-      ${riichiButton}
-      ${selfKanButtons}
-    </div>
-  `;
+  const inner = [
+    canTsumo ? '<button data-action="tsumo">ツモ和了</button>' : "",
+    riichiButton,
+    selfKanButtons,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (!inner) return "";
+  return `<div class="actions">${inner}</div>`;
 }
 
 // 和了/流局/終局はインラインではなくモーダルで盤面の上に重ねる。
