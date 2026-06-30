@@ -549,7 +549,7 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
         touchDragOffsetH = el.offsetHeight / 2;
         const ghost = document.createElement("div");
         ghost.className = "touch-drag-ghost";
-        ghost.innerHTML = el.outerHTML;
+        ghost.appendChild(el.cloneNode(true));
         ghost.style.left = `${t.clientX - touchDragOffsetW}px`;
         ghost.style.top = `${t.clientY - touchDragOffsetH}px`;
         document.body.appendChild(ghost);
@@ -585,13 +585,13 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       const target = document.elementFromPoint(t.clientX, t.clientY)
         ?.closest<HTMLElement>(".tile.hand[data-index]");
       const from = touchDragSrcIndex;
+      cleanupTouchDrag();
       if (target) {
         const to = Number(target.dataset.index);
         if (!Number.isNaN(from) && !Number.isNaN(to) && from !== to) {
           handlers.onReorder(from, to);
         }
       }
-      cleanupTouchDrag();
     });
 
     el.addEventListener("touchcancel", () => {
