@@ -178,11 +178,26 @@ h1 {
 
 .tile.hand.draggable {
   cursor: grab;
+  touch-action: none;
 }
 
 .tile.hand.draggable.dragging {
   cursor: grabbing;
   opacity: 0.5;
+}
+
+.touch-drag-ghost {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.85;
+  transform: scale(1.15);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+}
+
+.tile.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
 }
 
 /* 2クリック捨て牌: 1回目クリックで選択された牌のハイライト (ツモ牌のオレンジ背景とは別) */
@@ -198,6 +213,14 @@ h1 {
   transform: translateY(-6px) scale(1.18);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
   z-index: 5;
+}
+
+@media (pointer: coarse) {
+  .hand-row .tile.hand.clickable:hover {
+    transform: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    z-index: auto;
+  }
 }
 
 /* ツモ牌の背景ハイライト (並び替えても identity で追従) */
@@ -888,34 +911,258 @@ button.secondary {
   text-decoration: underline;
 }
 
-/* ---- モバイル fallback (崩れない最低限) ---- */
+/* ---- モバイル ---- */
 
 @media (max-width: 720px) {
   :root {
-    --tile-w: clamp(28px, 7vw, 40px);
-    --tile-h: clamp(40px, 9.8vw, 56px);
-    --hand-area-h: 120px;
+    --tile-w: clamp(24px, 6.5vw, 36px);
+    --tile-h: clamp(34px, 9.1vw, 50px);
+    --hand-area-h: 110px;
+    --tile-gap: 2px;
   }
 
   #app {
-    padding: 4px 8px 12px;
+    padding: 4px 4px 8px;
+  }
+
+  .app-header h1 {
+    font-size: 0.95rem;
   }
 
   .table {
-    --table-size: 96vw;
+    --table-size: min(calc(100dvh - var(--header-h) - var(--hand-area-h) - 16px), 98vw);
   }
 
-  /* grid を解除して縦積みに戻す */
   .hand-bar {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hand-row {
+    grid-column: unset;
+  }
+
+  .actions {
+    min-height: 44px;
+  }
+
+  .actions button {
+    min-height: 44px;
+    padding: 8px 14px;
   }
 
   .yaku-help-tab {
     font-size: 0.85rem;
     padding: 6px 10px;
+  }
+}
+
+@media (max-width: 400px) {
+  :root {
+    --tile-w: clamp(20px, 5.8vw, 28px);
+    --tile-h: clamp(28px, 8.1vw, 39px);
+    --tile-gap: 1px;
+  }
+
+  .tile.draw-separated {
+    margin-left: 6px;
+  }
+
+  .score-chip .chip-name {
+    display: none;
+  }
+
+  .actions button {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+}
+
+/* ---- 横向きモバイル (雀魂-style landscape) ---- */
+
+@media (max-height: 500px) and (min-aspect-ratio: 1/1) {
+  :root {
+    --header-h: 0px;
+    --hand-area-h: 64px;
+    --tile-w: clamp(32px, 6.5dvw, 48px);
+    --tile-h: clamp(45px, 9.1dvw, 56px);
+    --tile-gap: 2px;
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  #app {
+    max-width: none;
+    padding: 2px 4px 0;
+    padding-left: env(safe-area-inset-left, 4px);
+    padding-right: env(safe-area-inset-right, 4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100dvh;
+  }
+
+  .app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    z-index: 12;
+    background: transparent;
+    pointer-events: none;
+    padding: 2px 8px;
+    gap: 4px;
+  }
+
+  .app-header > * {
+    pointer-events: auto;
+  }
+
+  .app-header h1 {
+    display: none;
+  }
+
+  .phase-chip {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    background: rgba(35, 47, 62, 0.85);
+    border-radius: 4px;
+  }
+
+  .help-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 0.85rem;
+    background: rgba(35, 47, 62, 0.85);
+  }
+
+  .table {
+    --table-size: min(calc(100dvh - var(--hand-area-h) - 4px), calc(100dvw - 4px));
+    --tile-discard-w: max(16px, min(
+      calc((var(--table-size) - 50px) / 17.2),
+      calc((var(--table-size) - 150px) / 11.2)
+    ));
+    --zone-depth: calc(var(--tile-discard-h) * 2.5 + 16px);
+  }
+
+  .river {
+    min-height: calc(var(--tile-discard-h) * 2 + 3px);
+  }
+
+  .zone-left,
+  .zone-right {
+    overflow: hidden;
+  }
+
+  .center {
+    margin: 3px;
+    padding: 3px;
+  }
+
+  .hand-area {
+    position: relative;
+    width: 100%;
+    margin: auto 0 0;
+    padding: 2px 4px;
+    padding-bottom: env(safe-area-inset-bottom, 2px);
+    background: linear-gradient(transparent, rgba(22, 30, 45, 0.95) 8px);
+  }
+
+  .hand-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .hand-row {
+    grid-column: unset;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--tile-gap);
+  }
+
+  .human-melds {
+    grid-column: unset;
+    justify-self: unset;
+  }
+
+  .tile.draw-separated {
+    margin-left: 8px;
+  }
+
+  .hand-area > .actions {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 4px;
+    min-height: 0;
+    background: rgba(22, 30, 45, 0.9);
+    border-radius: 8px;
+    padding: 4px 8px;
+    z-index: 11;
+  }
+
+  .hand-area > .actions:empty {
+    display: none;
+  }
+
+  .hand-area > .actions button {
+    min-height: 44px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  .modal .tile {
+    --tile-w: 28px;
+    --tile-h: 39px;
+  }
+
+  .score-chip .chip-name {
+    display: none;
+  }
+
+  .modal {
+    max-height: 90dvh;
+    width: min(560px, 92vw);
+    padding: 12px;
+  }
+
+  .modal h2 {
+    font-size: 1rem;
+    margin-bottom: 4px;
+  }
+
+  .yaku-help-content {
+    height: min(90dvh, 720px);
+    width: min(720px, 92vw);
+  }
+
+  .yaku-help-header {
+    padding: 8px 12px;
+  }
+
+  .yaku-help-tab {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+  }
+
+  .toast {
+    bottom: 60px;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+  }
+
+  #debug-panel {
+    width: 260px;
+    font-size: 10px;
   }
 }
 

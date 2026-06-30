@@ -132,6 +132,25 @@ export function render(
 }
 
 let dragSrcIndex: number | null = null;
+let touchDragSrcIndex: number | null = null;
+let touchDragStartX = 0;
+let touchDragStartY = 0;
+let touchDragGhost: HTMLElement | null = null;
+let touchDragOverEl: HTMLElement | null = null;
+let touchDragOffsetW = 0;
+let touchDragOffsetH = 0;
+
+function cleanupTouchDrag(): void {
+  if (touchDragGhost) {
+    touchDragGhost.remove();
+    touchDragGhost = null;
+  }
+  if (touchDragOverEl) {
+    touchDragOverEl.classList.remove("drag-over");
+    touchDragOverEl = null;
+  }
+  touchDragSrcIndex = null;
+}
 
 function opponentZone(state: GameState, seat: Seat, pos: "top" | "left" | "right"): string {
   const player = state.players[seat];
@@ -344,13 +363,15 @@ function actionsHtml(state: GameState, ui: UiState): string {
     isMyTurn && state.riichiCandidates.length > 0
       ? `<button data-action="riichi" class="riichi${ui.riichiArmed ? " armed" : ""}">リーチ</button>`
       : "";
-  return `
-    <div class="actions">
-      <button data-action="tsumo" ${canTsumo ? "" : "disabled"}>ツモ和了</button>
-      ${riichiButton}
-      ${selfKanButtons}
-    </div>
-  `;
+  const inner = [
+    canTsumo ? '<button data-action="tsumo">ツモ和了</button>' : "",
+    riichiButton,
+    selfKanButtons,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (!inner) return "";
+  return `<div class="actions">${inner}</div>`;
 }
 
 // 和了/流局/終局はインラインではなくモーダルで盤面の上に重ねる。
@@ -502,6 +523,82 @@ function attachHandlers(root: HTMLElement, handlers: RenderHandlers): void {
       const from = dragSrcIndex ?? Number(e.dataTransfer?.getData("text/plain"));
       if (Number.isNaN(from) || Number.isNaN(to)) return;
       handlers.onReorder(from, to);
+    });
+
+    // タッチによる手牌並び替え (HTML5 DnD はタッチ非対応)
+    el.addEventListener("touchstart", (e) => {
+      if (touchDragGhost) return;
+      const idx = Number(el.dataset.index);
+      if (Number.isNaN(idx)) return;
+      const t = e.touches[0];
+      if (!t) return;
+      touchDragSrcIndex = idx;
+      touchDragStartX = t.clientX;
+      touchDragStartY = t.clientY;
+    }, { passive: true });
+
+    el.addEventListener("touchmove", (e) => {
+      if (touchDragSrcIndex === null) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - touchDragStartX;
+      const dy = t.clientY - touchDragStartY;
+
+      if (!touchDragGhost) {
+        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        e.preventDefault();
+        touchDragOffsetW = el.offsetWidth / 2;
+        touchDragOffsetH = el.offsetHeight / 2;
+        const ghost = document.createElement("div");
+        ghost.className = "touch-drag-ghost";
+        ghost.appendChild(el.cloneNode(true));
+        ghost.style.left = `${t.clientX - touchDragOffsetW}px`;
+        ghost.style.top = `${t.clientY - touchDragOffsetH}px`;
+        document.body.appendChild(ghost);
+        touchDragGhost = ghost;
+        el.classList.add("dragging");
+        return;
+      }
+
+      e.preventDefault();
+      touchDragGhost.style.left = `${t.clientX - touchDragOffsetW}px`;
+      touchDragGhost.style.top = `${t.clientY - touchDragOffsetH}px`;
+
+      const target = document.elementFromPoint(t.clientX, t.clientY)
+        ?.closest<HTMLElement>(".tile.hand[data-index]");
+      if (touchDragOverEl) touchDragOverEl.classList.remove("drag-over");
+      if (target && target !== el) {
+        target.classList.add("drag-over");
+        touchDragOverEl = target;
+      } else {
+        touchDragOverEl = null;
+      }
+    }, { passive: false });
+
+    el.addEventListener("touchend", (e) => {
+      if (touchDragSrcIndex === null) return;
+      if (!touchDragGhost) {
+        touchDragSrcIndex = null;
+        return;
+      }
+      el.classList.remove("dragging");
+      const t = e.changedTouches[0];
+      if (!t) { cleanupTouchDrag(); return; }
+      const target = document.elementFromPoint(t.clientX, t.clientY)
+        ?.closest<HTMLElement>(".tile.hand[data-index]");
+      const from = touchDragSrcIndex;
+      cleanupTouchDrag();
+      if (target) {
+        const to = Number(target.dataset.index);
+        if (!Number.isNaN(from) && !Number.isNaN(to) && from !== to) {
+          handlers.onReorder(from, to);
+        }
+      }
+    });
+
+    el.addEventListener("touchcancel", () => {
+      el.classList.remove("dragging");
+      cleanupTouchDrag();
     });
   });
   const on = (selector: string, fn: () => void) => {
